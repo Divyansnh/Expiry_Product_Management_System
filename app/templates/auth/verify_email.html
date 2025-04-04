@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Email{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center min-vh-100 align-items-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card border-0 shadow-lg rounded-4">
+                <div class="card-body p-4 p-md-5">
+                    <!-- Header with Icon -->
+                    <div class="text-center mb-4">
+                        <div class="verification-icon mb-3">
+                            <i class="bi bi-shield-check"></i>
+                        </div>
+                        <h2 class="h4 mb-2">Verify Your Email</h2>
+                        <p class="text-muted small">Enter the 6-digit code sent to your email</p>
+                    </div>
+                    
+                    <!-- Verification Form -->
+                    <form method="POST" action="{{ url_for('auth.verify_email') }}" class="needs-validation" novalidate>
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="mb-4">
+                            <div class="verification-input-group">
+                                <input type="text" 
+                                    name="verification_code" 
+                                    class="form-control verification-input" 
+                                    placeholder="• • • • • •" 
+                                    autocomplete="off"
+                                    maxlength="6"
+                                    pattern="[0-9]{6}"
+                                    required>
+                            </div>
+                            {% if form.verification_code.errors %}
+                                <div class="invalid-feedback d-block text-center mt-2">
+                                    {% for error in form.verification_code.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg rounded-pill">
+                                Verify Email
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <!-- Resend Code Link -->
+                    <div class="text-center mt-4">
+                        <p class="text-muted small mb-0">
+                            Didn't receive the code? 
+                            <a href="{{ url_for('auth.resend_verification') }}" class="text-primary text-decoration-none fw-medium">
+                                Resend Code
+                            </a>
+                        </p>
+                        <p class="text-muted small mt-2">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Code expires in 15 minutes
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    body {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }
+    
+    .card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+    }
+    
+    .verification-icon {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto;
+        background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .verification-icon i {
+        font-size: 2.5rem;
+        color: white;
+    }
+    
+    .verification-input-group {
+        position: relative;
+    }
+    
+    .verification-input {
+        height: 60px;
+        font-size: 1.5rem;
+        text-align: center;
+        letter-spacing: 8px;
+        padding: 0.5rem 1rem;
+        border: 2px solid #e9ecef;
+        border-radius: 12px;
+        background: #f8f9fa;
+        transition: all 0.3s ease;
+    }
+    
+    .verification-input:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+        background: white;
+    }
+    
+    .verification-input::placeholder {
+        color: #adb5bd;
+        letter-spacing: 4px;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+        border: none;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);
+    }
+    
+    .btn-primary:active {
+        transform: translateY(0);
+    }
+    
+    @media (max-width: 576px) {
+        .card {
+            margin: 1rem;
+        }
+        
+        .verification-input {
+            height: 50px;
+            font-size: 1.25rem;
+        }
+    }
+</style>
+{% endblock %} 
