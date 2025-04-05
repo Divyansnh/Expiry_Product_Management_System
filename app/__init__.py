@@ -12,7 +12,7 @@ from app.core.middleware import log_request, handle_cors, validate_request
 from app.routes import main_bp, auth_bp
 from app.routes.reports import reports_bp
 from app.api.v1 import api_bp
-from app.tasks.cleanup import cleanup_expired_items
+from app.tasks.cleanup import cleanup_expired_items, cleanup_unverified_accounts
 import os
 
 def create_app(config_class=Config):
@@ -25,21 +25,34 @@ def create_app(config_class=Config):
     # Initialize extensions
     init_extensions(app)
     
-    # Schedule cleanup task to run daily at midnight
-    def cleanup_with_context():
+    # Only initialize scheduler if not in testing mode
+    if not app.config.get('TESTING', False):
+        # Define context functions for cleanup tasks
+        def cleanup_expired_with_context():
+            with app.app_context():
+                cleanup_expired_items()
+                
+        def cleanup_unverified_with_context():
+            with app.app_context():
+                cleanup_unverified_accounts()
+        
+        # Add scheduled jobs only if not in testing mode
         with app.app_context():
-            cleanup_expired_items()
-    
-    scheduler.add_job(
-        id='cleanup_expired_items',
-        func=cleanup_with_context,
-        trigger='cron',
-        hour=0,
-        minute=0
-    )
-    
-    # Start the scheduler
-    scheduler.start()
+            scheduler.add_job(
+                id='cleanup_expired_items',
+                func=cleanup_expired_with_context,
+                trigger='cron',
+                hour='*',
+                minute=0
+            )
+            
+            scheduler.add_job(
+                id='cleanup_unverified_accounts',
+                func=cleanup_unverified_with_context,
+                trigger='cron',
+                hour='*',
+                minute=0
+            )
     
     # Register error handlers
     register_error_handlers(app)

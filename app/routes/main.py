@@ -7,6 +7,7 @@ from app.services.zoho_service import ZohoService
 from datetime import datetime, timedelta
 from flask import session
 from app.models.user import User
+import secrets
 
 main_bp = Blueprint('main', __name__)
 
@@ -201,7 +202,11 @@ def settings():
                 if new_password != confirm_password:
                     flash('Passwords do not match', 'error')
                     return redirect(url_for('main.settings'))
-                current_user.set_password(new_password)
+                try:
+                    current_user.password = new_password  # This will validate password strength
+                except ValueError as e:
+                    flash(str(e), 'error')
+                    return redirect(url_for('main.settings'))
             
             # Update Zoho credentials if provided
             new_zoho_client_id = request.form.get('zoho_client_id')
@@ -226,7 +231,7 @@ def settings():
                     current_user.zoho_client_secret = new_zoho_client_secret
             
             db.session.commit()
-            flash('Settings updated successfully!', 'success')
+            flash('Account settings updated successfully!', 'success')
             return redirect(url_for('main.settings'))
             
         except Exception as e:
@@ -533,4 +538,36 @@ def bulk_delete_items():
     except Exception as e:
         current_app.logger.error(f"Error in bulk delete: {str(e)}")
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/save-zoho-credentials', methods=['POST'])
+def save_zoho_credentials():
+    if not current_user.is_authenticated:
+        flash('Please log in to connect your Zoho account', 'warning')
+        return redirect(url_for('auth.login'))
+        
+    form = ZohoCredentialsForm()
+    if form.validate_on_submit():
+        try:
+            # Store the credentials in the session temporarily
+            session['zoho_credentials'] = {
+                'client_id': form.client_id.data,
+                'client_secret': form.client_secret.data,
+                'organization_id': form.organization_id.data
+            }
+            
+            # Generate state parameter for security
+            state = secrets.token_urlsafe(16)
+            session['oauth_state'] = state
+            
+            # Redirect to Zoho authorization URL
+            auth_url = zoho_service.get_authorization_url(state)
+            return redirect(auth_url)
+            
+        except Exception as e:
+            current_app.logger.error(f"Error preparing Zoho authorization: {str(e)}")
+            flash('An error occurred while preparing Zoho authorization', 'error')
+            return redirect(url_for('main.settings'))
+            
+    flash('Invalid form submission', 'error')
+    return redirect(url_for('main.settings')) 

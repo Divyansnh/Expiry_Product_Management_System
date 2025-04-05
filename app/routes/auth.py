@@ -31,40 +31,48 @@ def login():
         current_app.logger.info(f"Login attempt for email: {email}")
         
         user = User.query.filter_by(email=email).first()
-        if user and user.check_password(form.password.data):
-            current_app.logger.info(f"User found: {user.username}, is_verified: {user.is_verified}")
+        if not user:
+            current_app.logger.warning(f"Login failed: User not found for email {email}")
+            flash('Invalid email or password', 'danger')
+            return render_template('auth/login.html', title='Login', form=form)
             
-            if not user.is_verified:
-                current_app.logger.info(f"Unverified user {user.email} attempting to login")
-                # Store email in session for verification
-                session['pending_verification_email'] = user.email
-                # Generate and send new verification code
-                email_service = EmailService()
-                if email_service.send_verification_email(user):
-                    current_app.logger.info(f"Verification email sent to {user.email}")
-                    flash('Please verify your email before logging in. A new verification code has been sent.', 'warning')
-                else:
-                    current_app.logger.error(f"Failed to send verification email to {user.email}")
-                    flash('Error sending verification email. Please try again.', 'error')
-                return redirect(url_for('auth.verify_email'))
+        if not user.verify_password(form.password.data):
+            current_app.logger.warning(f"Login failed: Invalid password for user {user.username}")
+            flash('Invalid email or password', 'danger')
+            return render_template('auth/login.html', title='Login', form=form)
             
-            # Set session to permanent if remember me is checked
-            if form.remember_me.data:
-                session.permanent = True
-                current_app.permanent_session_lifetime = timedelta(hours=24)
-            
-            login_user(user, remember=form.remember_me.data)
-            
-            # Update last login
-            user.last_login = datetime.utcnow()
-            db.session.commit()
-            
-            next_page = request.args.get('next')
-            if not next_page or not next_page.startswith('/'):
-                next_page = url_for('main.index')
-            return redirect(next_page)
-            
-        flash('Invalid email or password', 'danger')
+        current_app.logger.info(f"User found: {user.username}, is_verified: {user.is_verified}")
+        
+        if not user.is_verified:
+            current_app.logger.info(f"Unverified user {user.email} attempting to login")
+            # Store email in session for verification
+            session['pending_verification_email'] = user.email
+            # Generate and send new verification code
+            email_service = EmailService()
+            if email_service.send_verification_email(user):
+                current_app.logger.info(f"Verification email sent to {user.email}")
+                flash('Please verify your email', 'warning')
+            else:
+                current_app.logger.error(f"Failed to send verification email to {user.email}")
+                flash('Error sending verification email', 'error')
+            return redirect(url_for('auth.verify_email'))
+        
+        # Set session to permanent if remember me is checked
+        if form.remember_me.data:
+            session.permanent = True
+            current_app.permanent_session_lifetime = timedelta(hours=24)
+        
+        login_user(user, remember=form.remember_me.data)
+        
+        # Update last login
+        user.last_login = datetime.utcnow()
+        db.session.commit()
+        
+        next_page = request.args.get('next')
+        if not next_page or not next_page.startswith('/'):
+            next_page = url_for('main.index')
+        return redirect(next_page)
+        
     return render_template('auth/login.html', title='Login', form=form)
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
@@ -118,12 +126,14 @@ def register():
             # Send verification email
             try:
                 send_verification_email(user)
+                # Store email in session for verification
+                session['pending_verification_email'] = user.email
                 flash('Registration successful! Please check your email to verify your account.', 'success')
             except Exception as e:
                 current_app.logger.error(f"Error sending verification email: {str(e)}")
                 flash('Registration successful! Please contact support to verify your account.', 'warning')
             
-            return redirect(url_for('auth.login'))
+            return redirect(url_for('auth.verify_email'))
             
         except Exception as e:
             current_app.logger.error(f"Error during registration: {str(e)}")
@@ -143,29 +153,20 @@ def verify_email():
         # Get the current user's email from session or current_user
         email = current_user.email if current_user.is_authenticated else session.get('pending_verification_email')
         
-        current_app.logger.info(f"Attempting verification for email: {email}")
-        current_app.logger.info(f"Current user authenticated: {current_user.is_authenticated}")
-        current_app.logger.info(f"Session pending email: {session.get('pending_verification_email')}")
-        
         if not email:
-            current_app.logger.error("No email found in session or current_user")
             flash('Email not found. Please try logging in again.', 'error')
             return redirect(url_for('auth.login'))
             
         user = User.query.filter_by(email=email).first()
         if not user:
-            current_app.logger.error(f"User not found for email: {email}")
             flash('User not found. Please try registering again.', 'error')
             return redirect(url_for('auth.register'))
             
-        current_app.logger.info(f"Verifying code for user: {user.username}")
         if user.verify_code(form.verification_code.data):
-            current_app.logger.info("Verification successful")
-            flash('Email verified successfully!', 'success')
-            return redirect(url_for('main.dashboard'))
+            flash('Email verified successfully', 'success')
+            return redirect(url_for('auth.login'))
         else:
-            current_app.logger.error("Invalid or expired verification code")
-            flash('Invalid verification code or code has expired', 'error')
+            flash('Invalid verification code', 'error')
             
     return render_template('auth/verify_email.html', form=form)
 
@@ -364,48 +365,66 @@ def forgot_password():
             
     return render_template('auth/forgot_password.html', form=form)
 
-@auth_bp.route('/reset-password/<token>', methods=['GET', 'POST'])
-def reset_password(token):
-    """Handle password reset."""
+@auth_bp.route('/reset_password_request', methods=['GET', 'POST'])
+def reset_password_request():
+    """Handle password reset request."""
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
         
-    try:
-        # On GET request, just verify the token is valid but don't invalidate it
-        if request.method == 'GET':
-            user = User.verify_password_reset_token(token, invalidate=False)
-            if not user:
-                current_app.logger.warning(f"Invalid or expired password reset token: {token}")
-                flash('Invalid or expired password reset link')
-                return redirect(url_for('auth.forgot_password'))
-            return render_template('auth/reset_password.html', form=ResetPasswordForm())
-            
-        # On POST request, verify and invalidate the token
-        user = User.verify_password_reset_token(token, invalidate=True)
-        if not user:
-            current_app.logger.warning(f"Invalid or expired password reset token: {token}")
-            flash('Invalid or expired password reset link')
-            return redirect(url_for('auth.forgot_password'))
-            
-        form = ResetPasswordForm()
-        if form.validate_on_submit():
-            user.set_password(form.password.data)
-            # Invalidate the used token
+    form = ResetPasswordRequestForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data).first()
+        if user:
+            token = user.get_password_reset_token()
+            email_service = EmailService()
+            reset_url = url_for('auth.reset_password', token=token, _external=True)
+            if email_service.send_password_reset_email(user.email, reset_url):
+                flash('Check your email', 'info')
+                return redirect(url_for('auth.login'))
+            else:
+                flash('Error sending password reset email', 'error')
+        else:
+            flash('Check your email', 'info')  # Don't reveal if email exists
+            return redirect(url_for('auth.login'))
+    return render_template('auth/reset_password_request.html', title='Reset Password', form=form)
+
+@auth_bp.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Reset password with token."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.index'))
+        
+    # Check if token is valid before showing the form
+    user = User.query.filter_by(password_reset_token=token).first()
+    if not user:
+        flash('Invalid or expired password reset link', 'danger')
+        return redirect(url_for('auth.login'))
+        
+    if not user.verify_reset_token(token):
+        flash('Invalid or expired password reset link', 'danger')
+        return redirect(url_for('auth.login'))
+        
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        try:
+            user.password = form.password.data
             user.invalidate_reset_token()
             db.session.commit()
             
             # Send confirmation email
             email_service = EmailService()
-            email_service.send_password_reset_confirmation(user.email)
-            
-            flash('Your password has been reset successfully')
+            if email_service.send_password_reset_confirmation(user.email):
+                current_app.logger.info(f"Password reset confirmation email sent to {user.email}")
+            else:
+                current_app.logger.error(f"Failed to send password reset confirmation email to {user.email}")
+                
+            flash('Your password has been reset. Please log in with your new password.', 'success')
             return redirect(url_for('auth.login'))
+        except ValueError as e:
+            flash(str(e), 'danger')
+            return render_template('auth/reset_password.html', form=form, token=token)
             
-        return render_template('auth/reset_password.html', form=form)
-    except Exception as e:
-        current_app.logger.error(f"Error during password reset: {str(e)}")
-        flash('An error occurred while processing your request')
-        return redirect(url_for('auth.forgot_password'))
+    return render_template('auth/reset_password.html', form=form, token=token)
 
 def send_verification_email(user):
     """Send verification email to user."""

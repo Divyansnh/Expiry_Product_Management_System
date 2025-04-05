@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from app.core.extensions import db
 from app.models.item import Item
 from app.models.notification import Notification
+from app.models.user import User
 from app.services.zoho_service import ZohoService
 from flask import current_app
 
@@ -44,4 +45,43 @@ def cleanup_expired_items():
         
     except Exception as e:
         current_app.logger.error(f"Error cleaning up expired items: {str(e)}")
-        db.session.rollback() 
+        db.session.rollback()
+
+def cleanup_unverified_accounts():
+    """Cleanup unverified user accounts that are older than 1 hour."""
+    try:
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        
+        # Find unverified accounts older than 1 hour
+        unverified_users = User.query.filter_by(
+            is_verified=False
+        ).filter(
+            User.created_at <= one_hour_ago
+        ).all()
+        
+        deleted_count = 0
+        for user in unverified_users:
+            try:
+                # Delete all items associated with the user
+                Item.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+                
+                # Delete all notifications associated with the user
+                Notification.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+                
+                # Delete the user
+                db.session.delete(user)
+                deleted_count += 1
+                
+            except Exception as e:
+                current_app.logger.error(f"Error deleting user {user.id}: {str(e)}")
+                db.session.rollback()
+                continue
+        
+        db.session.commit()
+        current_app.logger.info(f"Successfully cleaned up {deleted_count} unverified accounts")
+        return deleted_count
+        
+    except Exception as e:
+        current_app.logger.error(f"Error cleaning up unverified accounts: {str(e)}")
+        db.session.rollback()
+        return 0 

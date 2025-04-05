@@ -1,6 +1,123 @@
-# Product Inventory & Expiry Tracking System
+# Smart Inventory Manager - AI-Powered Expiry Tracking
 
-A Flask-based web application for managing product inventory and tracking expiry dates. The system integrates with Zoho for inventory management and provides features like OCR-based expiry date extraction, notifications, and analytics.
+A modern Flask-based web application for intelligent inventory management and expiry date tracking. The system integrates with Zoho for inventory management and provides advanced features like OCR-based expiry date extraction, real-time notifications, and comprehensive analytics.
+
+## 🌟 Key Features
+
+- **Smart Inventory Management**
+  - Real-time inventory tracking
+  - Automated expiry date monitoring
+  - Bulk operations support
+  - Category-based organization
+
+- **AI-Powered Features**
+  - OCR-based expiry date extraction from images
+  - Intelligent expiry predictions
+  - Automated categorization
+
+- **Integration Capabilities**
+  - Seamless Zoho integration
+  - Email notifications system
+  - SMS alerts via Twilio (optional)
+  - RESTful API support
+
+- **Security & Compliance**
+  - Secure user authentication
+  - Role-based access control
+  - Email verification
+  - Password reset functionality
+
+- **Analytics & Reporting**
+  - Real-time dashboard
+  - Customizable reports
+  - Expiry trend analysis
+  - Inventory insights
+
+## 🚀 Quick Start
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/yourusername/smart-inventory-manager.git
+cd smart-inventory-manager
+```
+
+2. **Set up the environment**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+3. **Configure the application**
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+4. **Initialize the database**
+```bash
+flask db upgrade
+```
+
+5. **Run the application**
+```bash
+flask run
+```
+
+## 🔧 Configuration
+
+The application is configured through environment variables in the `.env` file. See `.env.example` for all available options.
+
+### Required Configuration
+- Database URL
+- Email settings
+- Zoho credentials
+- Secret key
+
+### Optional Configuration
+- Twilio settings for SMS
+- Custom logging
+- Session settings
+
+## 📦 Project Structure
+
+```
+smart-inventory-manager/
+├── app/
+│   ├── models/          # Database models
+│   ├── routes/          # Application routes
+│   ├── templates/       # HTML templates
+│   ├── static/          # Static files
+│   ├── tasks/           # Background tasks
+│   └── utils/           # Utility functions
+├── migrations/          # Database migrations
+├── scripts/            # Utility scripts
+├── tests/              # Test suite
+└── docs/               # Documentation
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Flask Framework
+- Zoho API
+- Twilio API
+- All contributors and supporters
+
+## 📞 Support
+
+For support, please open an issue in the GitHub repository or contact the maintainers.
 
 ## Features
 
@@ -20,36 +137,6 @@ A Flask-based web application for managing product inventory and tracking expiry
 - PostgreSQL database
 - Zoho account for inventory integration
 - Twilio account for SMS notifications (optional)
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/expiry_tracker_v2.git
-cd expiry_tracker_v2
-```
-
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-5. Initialize the database:
-```bash
-flask db upgrade
-```
 
 ## Configuration
 

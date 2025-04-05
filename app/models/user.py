@@ -16,9 +16,9 @@ class User(UserMixin, BaseModel):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.String(256))
     password_reset_token = db.Column(db.String(256))
     is_active = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
@@ -28,7 +28,7 @@ class User(UserMixin, BaseModel):
     notification_preferences = db.Column(db.JSON, default=dict)
     
     # Verification fields
-    verification_code = db.Column(db.String(6))
+    verification_code = db.Column(db.String(32))
     verification_code_expires_at = db.Column(db.DateTime)
     is_verified = db.Column(db.Boolean, default=False)
     
@@ -49,6 +49,15 @@ class User(UserMixin, BaseModel):
     zoho_token_expires_at = db.Column(db.DateTime)
     zoho_organization_id = db.Column(db.String(255))
     
+    # Password reset fields
+    password_reset_token = db.Column(db.String(256))
+    password_reset_token_expires_at = db.Column(db.DateTime)
+    
+    def __init__(self, username=None, email=None, is_verified=False):
+        self.username = username
+        self.email = email
+        self.is_verified = is_verified
+    
     @property
     def password(self):
         raise AttributeError('password is not a readable attribute')
@@ -63,6 +72,10 @@ class User(UserMixin, BaseModel):
                 "- At least one number\n"
                 "- At least one special character"
             )
+        self.password_hash = generate_password_hash(password)
+    
+    def set_password(self, password):
+        """Set password hash without validation for testing purposes."""
         self.password_hash = generate_password_hash(password)
     
     def _is_strong_password(self, password):
@@ -89,26 +102,29 @@ class User(UserMixin, BaseModel):
         return True
     
     def verify_password(self, password):
+        """Verify password."""
         return check_password_hash(self.password_hash, password)
     
     def generate_verification_code(self):
-        """Generate a 6-digit verification code."""
+        """Generate email verification code."""
+        # Generate a 6-digit verification code
         self.verification_code = ''.join(secrets.choice(string.digits) for _ in range(6))
-        self.verification_code_expires_at = datetime.utcnow() + timedelta(minutes=15)
+        self.verification_code_expires_at = datetime.utcnow() + timedelta(hours=1)
         self.save()
+        return self.verification_code
     
     def verify_code(self, code):
-        """Verify the code and activate user if correct."""
-        if (self.verification_code == code and 
-            self.verification_code_expires_at and 
-            datetime.utcnow() < self.verification_code_expires_at):
-            self.is_verified = True
-            self.is_active = True
-            self.verification_code = None
-            self.verification_code_expires_at = None
-            self.save()
-            return True
-        return False
+        """Verify email verification code."""
+        if (self.verification_code != code or 
+            not self.verification_code_expires_at or 
+            self.verification_code_expires_at < datetime.utcnow()):
+            return False
+        self.is_verified = True
+        self.verification_code = None
+        self.verification_code_expires_at = None
+        db.session.add(self)
+        db.session.commit()
+        return True
     
     def save(self):
         """Save user to database."""
@@ -134,22 +150,25 @@ class User(UserMixin, BaseModel):
         """String representation of the user."""
         return f'<User {self.username}>'
 
-    def get_password_reset_token(self, expires_in=3600):
-        """Generate a password reset token."""
-        return jwt.encode(
-            {
-                'reset_password': self.id,
-                'email': self.email,
-                'exp': time() + expires_in,
-                'used': False
-            },
-            current_app.config['SECRET_KEY'],
-            algorithm='HS256'
-        )
+    def get_password_reset_token(self):
+        """Generate password reset token."""
+        self.password_reset_token = secrets.token_hex(16)
+        self.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
+        self.save()
+        return self.password_reset_token
+
+    def verify_reset_token(self, token):
+        """Verify password reset token."""
+        if (self.password_reset_token != token or 
+            not self.password_reset_token_expires_at or 
+            self.password_reset_token_expires_at < datetime.utcnow()):
+            return False
+        return True
 
     def invalidate_reset_token(self):
         """Invalidate any existing password reset tokens."""
         self.password_reset_token = None
+        self.password_reset_token_expires_at = None
         db.session.commit()
 
     @staticmethod
