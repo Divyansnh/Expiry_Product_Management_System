@@ -335,9 +335,9 @@ def forgot_password():
         if user:
             current_app.logger.info(f"User found: {user.username}")
             # Invalidate any existing reset tokens
-            user.invalidate_reset_token()
+            user.clear_password_reset_token()
             # Generate new token
-            token = user.get_password_reset_token()
+            token = user.generate_password_reset_token()
             current_app.logger.info(f"Generated reset token: {token[:20]}...")
             user.password_reset_token = token
             db.session.commit()
@@ -394,13 +394,14 @@ def reset_password(token):
     if current_user.is_authenticated:
         return redirect(url_for('main.index'))
         
-    # Check if token is valid before showing the form
+    # Find user by token
     user = User.query.filter_by(password_reset_token=token).first()
     if not user:
         flash('Invalid or expired password reset link', 'danger')
         return redirect(url_for('auth.login'))
         
-    if not user.verify_reset_token(token):
+    # Verify the token
+    if not user.verify_password_reset_token(token):
         flash('Invalid or expired password reset link', 'danger')
         return redirect(url_for('auth.login'))
         
@@ -408,7 +409,7 @@ def reset_password(token):
     if form.validate_on_submit():
         try:
             user.password = form.password.data
-            user.invalidate_reset_token()
+            user.clear_password_reset_token()
             db.session.commit()
             
             # Send confirmation email

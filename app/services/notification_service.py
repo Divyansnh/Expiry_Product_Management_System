@@ -224,4 +224,68 @@ class NotificationService:
             notification.status = 'read'
             db.session.commit()
             return True
-        return False 
+        return False
+    
+    def create_notification(
+        self,
+        user_id: int,
+        item_id: int,
+        message: str,
+        type: str,
+        priority: str = 'medium'
+    ) -> Optional[Notification]:
+        """Create a new notification.
+        
+        Args:
+            user_id: ID of the user to notify
+            item_id: ID of the related item
+            message: Notification message
+            type: Type of notification (e.g., 'expiry', 'low_stock')
+            priority: Priority level ('low', 'medium', 'high')
+            
+        Returns:
+            The created notification or None if creation failed
+        """
+        try:
+            notification = Notification(
+                user_id=user_id,
+                item_id=item_id,
+                message=message,
+                type=type,
+                priority=priority,
+                created_at=datetime.now()
+            )
+            db.session.add(notification)
+            db.session.commit()
+            return notification
+        except Exception as e:
+            db.session.rollback()
+            return None
+
+    def get_user_notifications(self, user_id: int, limit: Optional[int] = None) -> List[Notification]:
+        """Get notifications for a user.
+        
+        Args:
+            user_id: ID of the user
+            limit: Optional limit on number of notifications to return
+            
+        Returns:
+            List of notifications, optionally limited in number
+        """
+        query = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def mark_as_read(self, notification_id: int) -> bool:
+        """Mark a notification as read."""
+        try:
+            notification = Notification.query.get(notification_id)
+            if notification:
+                notification.is_read = True
+                db.session.commit()
+                return True
+            return False
+        except Exception:
+            db.session.rollback()
+            return False 

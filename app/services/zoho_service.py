@@ -516,6 +516,12 @@ class ZohoService:
             
             if response.status_code == 200:
                 current_app.logger.info(f"Successfully updated item {zoho_item_id} in Zoho with status: {status}")
+                
+                # Update local item status if it exists
+                local_item = Item.query.filter_by(zoho_item_id=zoho_item_id).first()
+                if local_item:
+                    local_item.update_status(force_update=True)
+                
                 return True
             elif response.status_code == 401:
                 current_app.logger.info("Token expired, attempting to refresh")
@@ -577,6 +583,9 @@ class ZohoService:
                     
                 # Check if item has expired
                 if item.expiry_date.date() <= current_date:
+                    # Update local status first
+                    item.update_status(force_update=True)
+                    
                     # Update item status in Zoho to inactive
                     self.update_item_in_zoho(item.zoho_item_id, {
                         "name": item.name,

@@ -31,18 +31,17 @@ def dashboard():
         
         # Update status for all items
         for item in items:
-            item.update_status()
-            current_app.logger.info(f"Item {item.name} (ID: {item.id}): status={item.status}, expiry_date={item.expiry_date}, days_until_expiry={item.days_until_expiry}")
+            item.update_status(force_update=True)
         
         # Get expiring and expired items using model properties
         expiring_items = [item for item in items if item.is_near_expiry]
         expired_items = [item for item in items if item.is_expired]
         
-        current_app.logger.info(f"Dashboard counts - Expiring: {len(expiring_items)}, Expired: {len(expired_items)}")
-        for item in expiring_items:
-            current_app.logger.info(f"Expiring item: {item.name} (ID: {item.id}), days until expiry: {item.days_until_expiry}")
-        for item in expired_items:
-            current_app.logger.info(f"Expired item: {item.name} (ID: {item.id}), days until expiry: {item.days_until_expiry}")
+        current_app.logger.info(
+            f"Dashboard counts - Total: {len(items)}, "
+            f"Expiring: {len(expiring_items)}, "
+            f"Expired: {len(expired_items)}"
+        )
         
         # Get recent notifications
         notifications = notification_service.get_user_notifications(current_user.id, limit=5)
@@ -80,8 +79,7 @@ def inventory():
     current_app.logger.info(f"Found {len(items)} total items for user {current_user.id}")
     
     for item in items:
-        item.update_status()
-        current_app.logger.info(f"Item {item.name} (ID: {item.id}): status={item.status}, expiry_date={item.expiry_date}, days_until_expiry={item.days_until_expiry}")
+        item.update_status(force_update=True)
     
     # Get filter parameters
     status = request.args.get('status')
@@ -93,26 +91,13 @@ def inventory():
     # Apply status filter
     if status:
         if status == 'expiring_soon':
-            # Items expiring within 30 days but not expired
-            query = query.filter(
-                Item.expiry_date.isnot(None),
-                Item.expiry_date > datetime.now().date(),
-                Item.expiry_date <= (datetime.now().date() + timedelta(days=30))
-            )
+            query = query.filter(Item.status == 'Expiring Soon')
             current_app.logger.info("Filtering for expiring soon items")
         elif status == 'expired':
-            # Items that have passed their expiry date
-            query = query.filter(
-                Item.expiry_date.isnot(None),
-                Item.expiry_date <= datetime.now().date()
-            )
+            query = query.filter(Item.status == 'Expired')
             current_app.logger.info("Filtering for expired items")
         elif status == 'active':
-            # Items that are not expired and not expiring soon
-            query = query.filter(
-                Item.expiry_date.isnot(None),
-                Item.expiry_date > (datetime.now().date() + timedelta(days=30))
-            )
+            query = query.filter(Item.status == 'Active')
             current_app.logger.info("Filtering for active items")
     
     # Apply search filter
@@ -127,23 +112,11 @@ def inventory():
         )
     
     items = query.all()
-    current_app.logger.info(f"Inventory view counts - Total: {len(items)}, Status filter: {status}")
-    
-    # Update status for all items based on expiry date
-    for item in items:
-        item.update_status()
-    
-    # Log items by status
-    expired_count = len([item for item in items if item.status == 'Expired'])
-    expiring_count = len([item for item in items if item.status == 'Expiring Soon'])
-    current_app.logger.info(f"Inventory status counts - Expired: {expired_count}, Expiring Soon: {expiring_count}")
-    
-    # Get Zoho status for each item
-    for item in items:
-        if item.zoho_item_id:
-            item.zoho_status = zoho_service.get_item_status(item.zoho_item_id)
-        else:
-            item.zoho_status = None
+    current_app.logger.info(
+        f"Inventory view counts - Total: {len(items)}, "
+        f"Status filter: {status}, "
+        f"Search term: {search}"
+    )
     
     return render_template('inventory.html',
                          items=items,

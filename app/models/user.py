@@ -9,6 +9,8 @@ from time import time
 import secrets
 import string
 import re
+import bcrypt
+from typing import Optional
 
 class User(UserMixin, BaseModel):
     """User model for authentication and user management."""
@@ -19,13 +21,17 @@ class User(UserMixin, BaseModel):
     username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256))
-    password_reset_token = db.Column(db.String(256))
+    password_salt = db.Column(db.String(256))  # Store salt separately
     is_active = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
     notification_preferences = db.Column(db.JSON, default=dict)
+    
+    # Security fields
+    login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime)
     
     # Verification fields
     verification_code = db.Column(db.String(32))
@@ -38,8 +44,8 @@ class User(UserMixin, BaseModel):
     in_app_notifications = db.Column(db.Boolean, default=False)
     
     # Relationships
-    items = db.relationship('Item', backref='user', lazy=True)
-    user_notifications = db.relationship('Notification', backref='notification_user', lazy=True)
+    items = db.relationship('Item', back_populates='user', lazy='dynamic')
+    notifications = db.relationship('Notification', back_populates='user', lazy='dynamic')
     
     # Zoho integration fields
     zoho_client_id = db.Column(db.String(255))
@@ -72,13 +78,53 @@ class User(UserMixin, BaseModel):
                 "- At least one number\n"
                 "- At least one special character"
             )
-        self.password_hash = generate_password_hash(password)
+        # Generate a new salt for each password
+        salt = bcrypt.gensalt()
+        self.password_salt = salt.decode('utf-8')
+        self.password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
     
-    def set_password(self, password):
-        """Set password hash without validation for testing purposes."""
-        self.password_hash = generate_password_hash(password)
+    def verify_password(self, password: str) -> bool:
+        """Verify a password against the stored hash."""
+        if not self.password_hash or not self.password_salt:
+            return False
+        
+        # Check if account is locked
+        if self.is_locked():
+            return False
+            
+        # Verify password using bcrypt
+        is_valid = bcrypt.checkpw(
+            password.encode('utf-8'),
+            self.password_hash.encode('utf-8')
+        )
+        
+        if is_valid:
+            self.login_attempts = 0
+            self.locked_until = None
+            self.last_login = datetime.utcnow()
+            db.session.commit()
+        else:
+            self.login_attempts += 1
+            if self.login_attempts >= current_app.config['MAX_LOGIN_ATTEMPTS']:
+                self.locked_until = datetime.utcnow() + current_app.config['LOGIN_LOCKOUT_TIME']
+            db.session.commit()
+            
+        return is_valid
     
-    def _is_strong_password(self, password):
+    def is_locked(self) -> bool:
+        """Check if the account is currently locked."""
+        if not self.locked_until:
+            return False
+        return datetime.utcnow() < self.locked_until
+    
+    def get_lockout_time_remaining(self) -> Optional[timedelta]:
+        """Get the remaining lockout time if account is locked."""
+        if not self.is_locked() or not self.locked_until:
+            return None
+        remaining = self.locked_until - datetime.utcnow()
+        return remaining if remaining.total_seconds() > 0 else None
+    
+    def _is_strong_password(self, password: str) -> bool:
         """Check if password meets strength requirements."""
         if len(password) < 8:
             return False
@@ -98,12 +144,8 @@ class User(UserMixin, BaseModel):
         # Check for at least one special character
         if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
             return False
-        
+            
         return True
-    
-    def verify_password(self, password):
-        """Verify password."""
-        return check_password_hash(self.password_hash, password)
     
     def generate_verification_code(self):
         """Generate email verification code."""
@@ -150,71 +192,109 @@ class User(UserMixin, BaseModel):
         """String representation of the user."""
         return f'<User {self.username}>'
 
-    def get_password_reset_token(self):
-        """Generate password reset token."""
-        self.password_reset_token = secrets.token_hex(16)
-        self.password_reset_token_expires_at = datetime.utcnow() + timedelta(hours=1)
-        self.save()
-        return self.password_reset_token
-
-    def verify_reset_token(self, token):
-        """Verify password reset token."""
-        if (self.password_reset_token != token or 
-            not self.password_reset_token_expires_at or 
-            self.password_reset_token_expires_at < datetime.utcnow()):
+    def generate_password_reset_token(self, expires_in: int = 3600) -> str:
+        """Generate a password reset token using JWT."""
+        try:
+            payload = {
+                'reset_password': self.id,
+                'email': self.email,
+                'exp': time() + expires_in
+            }
+            token = jwt.encode(
+                payload,
+                current_app.config['SECRET_KEY'],
+                algorithm='HS256'
+            )
+            self.password_reset_token = token
+            self.password_reset_token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            db.session.commit()
+            return token
+        except Exception as e:
+            current_app.logger.error(f"Error generating password reset token: {str(e)}")
+            raise
+    
+    def verify_password_reset_token(self, token: str) -> bool:
+        """Verify a password reset token."""
+        try:
+            if not token or not self.password_reset_token:
+                return False
+                
+            # First verify the JWT token
+            payload = jwt.decode(
+                token,
+                current_app.config['SECRET_KEY'],
+                algorithms=['HS256']
+            )
+            
+            # Check if token matches what's stored in database
+            if not secrets.compare_digest(self.password_reset_token, token):
+                return False
+                
+            # Check if token has expired
+            if not self.password_reset_token_expires_at:
+                return False
+            if datetime.utcnow() > self.password_reset_token_expires_at:
+                return False
+                
+            # Verify the user ID and email match
+            if payload.get('reset_password') != self.id or payload.get('email') != self.email:
+                return False
+                
+            return True
+        except jwt.ExpiredSignatureError:
+            current_app.logger.warning("Password reset token has expired")
             return False
-        return True
-
-    def invalidate_reset_token(self):
-        """Invalidate any existing password reset tokens."""
+        except jwt.InvalidTokenError as e:
+            current_app.logger.warning(f"Invalid password reset token: {str(e)}")
+            return False
+        except Exception as e:
+            current_app.logger.error(f"Error verifying password reset token: {str(e)}")
+            return False
+    
+    def clear_password_reset_token(self):
+        """Clear the password reset token."""
         self.password_reset_token = None
         self.password_reset_token_expires_at = None
         db.session.commit()
 
     @staticmethod
-    def verify_password_reset_token(token, invalidate=True):
-        """Verify password reset token and optionally mark it as used."""
+    def verify_reset_token(token: str) -> Optional['User']:
+        """Static method to verify a password reset token and return the user."""
         try:
             payload = jwt.decode(token, current_app.config['SECRET_KEY'],
                                algorithms=['HS256'])
-            id = payload['reset_password']
+            user_id = payload['reset_password']
             email = payload.get('email')
             used = payload.get('used', False)
             exp = payload.get('exp')
             
-            current_app.logger.info(f"Verifying password reset token for user {id}")
+            current_app.logger.info(f"Verifying password reset token for user {user_id}")
             current_app.logger.debug(f"Token payload: {payload}")
             
             # Check if token has expired
             if exp and time() > exp:
-                current_app.logger.warning(f"Token has expired for user {id}")
+                current_app.logger.warning(f"Token has expired for user {user_id}")
                 return None
                 
             # Check if token has already been used
             if used:
-                current_app.logger.warning(f"Token has already been used for user {id}")
+                current_app.logger.warning(f"Token has already been used for user {user_id}")
                 return None
                 
-            user = User.query.get(id)
+            user = User.query.get(user_id)
             if not user:
-                current_app.logger.warning(f"User {id} not found")
+                current_app.logger.warning(f"User {user_id} not found")
                 return None
                 
             # Verify that the email matches
             if user.email != email:
-                current_app.logger.warning(f"Email mismatch for user {id}. Token email: {email}, User email: {user.email}")
+                current_app.logger.warning(f"Email mismatch for user {user_id}. Token email: {email}, User email: {user.email}")
                 return None
                 
             # Verify that the token matches what's stored in the database
             if user.password_reset_token != token:
-                current_app.logger.warning(f"Token mismatch for user {id}")
+                current_app.logger.warning(f"Token mismatch for user {user_id}")
                 return None
-                
-            # Invalidate the token if requested
-            if invalidate:
-                user.password_reset_token = None
-                db.session.commit()
-                current_app.logger.info(f"Token invalidated for user {id}")
                 
             return user
         except jwt.ExpiredSignatureError:

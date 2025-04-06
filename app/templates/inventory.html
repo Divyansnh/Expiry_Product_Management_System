@@ -40,9 +40,9 @@
                     <label for="status" class="block text-sm font-medium text-gray-700">Status</label>
                     <select id="status" name="status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
                         <option value="">All Status</option>
-                        <option value="active" {% if current_status == 'active' %}selected{% endif %}>Active</option>
-                        <option value="expired" {% if current_status == 'expired' %}selected{% endif %}>Expired</option>
-                        <option value="expiring_soon" {% if current_status == 'expiring_soon' %}selected{% endif %}>Expiring Soon</option>
+                        <option value="{{ STATUS_ACTIVE }}" {% if current_status == STATUS_ACTIVE %}selected{% endif %}>Active</option>
+                        <option value="{{ STATUS_EXPIRED }}" {% if current_status == STATUS_EXPIRED %}selected{% endif %}>Expired</option>
+                        <option value="{{ STATUS_EXPIRING_SOON }}" {% if current_status == STATUS_EXPIRING_SOON %}selected{% endif %}>Expiring Soon</option>
                     </select>
                 </div>
                 <div>
@@ -101,7 +101,7 @@
                                         {% endif %}
                                     </div>
                                 {% else %}
-                                    {% if item.status == 'Pending Expiry Date' %}
+                                    {% if item.status == STATUS_PENDING %}
                                         <div class="text-sm text-yellow-600">Set expiry date</div>
                                     {% else %}
                                         <div class="text-sm text-gray-500">N/A</div>
@@ -109,20 +109,20 @@
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                {% if item.status == 'Pending Expiry Date' %}
+                                {% if item.status == STATUS_PENDING %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                                         Pending Expiry Date
                                     </span>
                                     <p class="text-xs text-gray-500 mt-1">Please set expiry date within 24 hours</p>
-                                {% elif item.status == 'Expiring Soon' %}
+                                {% elif item.status == STATUS_EXPIRING_SOON %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
                                         Expiring Soon
                                     </span>
-                                {% elif item.status == 'Active' %}
+                                {% elif item.status == STATUS_ACTIVE %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                                         Active
                                     </span>
-                                {% elif item.status == 'Expired' %}
+                                {% elif item.status == STATUS_EXPIRED %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
                                         Expired
                                     </span>
@@ -135,7 +135,7 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <button onclick="editItem({{ item.id }})" 
                                         class="text-blue-600 hover:text-blue-900 mr-3"
-                                        {% if item.status != 'Active' and item.status != 'Expiring Soon' and item.status != 'Pending Expiry Date' %}disabled{% endif %}>
+                                        {% if item.status not in [STATUS_ACTIVE, STATUS_EXPIRING_SOON, STATUS_PENDING] %}disabled{% endif %}>
                                     Edit
                                 </button>
                                 <button onclick="deleteItem({{ item.id }})" class="text-red-600 hover:text-red-900">Delete</button>
@@ -413,7 +413,7 @@ document.getElementById('editItemForm').addEventListener('submit', async functio
     }
     
     // Allow editing if item is Active, Expiring Soon, or Pending Expiry Date
-    if (itemStatus !== 'Active' && itemStatus !== 'Expiring Soon' && itemStatus !== 'Pending Expiry Date') {
+    if (itemStatus !== '{{ STATUS_ACTIVE }}' && itemStatus !== '{{ STATUS_EXPIRING_SOON }}' && itemStatus !== '{{ STATUS_PENDING }}') {
         alert('Only Active, Expiring Soon, and Pending Expiry Date items can be edited.');
         return;
     }
@@ -424,7 +424,7 @@ document.getElementById('editItemForm').addEventListener('submit', async functio
     };
     
     // Add discounted price if item is Expiring Soon
-    if (itemStatus === 'Expiring Soon') {
+    if (itemStatus === '{{ STATUS_EXPIRING_SOON }}') {
         const discountedPrice = formData.get('discounted_price');
         if (discountedPrice) {
             data.discounted_price = parseFloat(discountedPrice);
@@ -475,7 +475,7 @@ async function editItem(itemId) {
         const discountedPriceContainer = document.getElementById('editDiscountedPriceContainer');
         const discountedPriceInput = document.getElementById('editDiscountedPrice');
         
-        if (item.status === 'Expired') {
+        if (item.status === '{{ STATUS_EXPIRED }}') {
             statusMessage.classList.remove('hidden');
             statusMessage.querySelector('p').textContent = 'Expired items cannot be edited.';
             expiryDateInput.disabled = true;
@@ -488,7 +488,7 @@ async function editItem(itemId) {
             expiryDateInput.min = today;
             
             // Show/hide discounted price field based on status
-            if (item.status === 'Expiring Soon') {
+            if (item.status === '{{ STATUS_EXPIRING_SOON }}') {
                 discountedPriceContainer.classList.remove('hidden');
                 discountedPriceInput.value = item.discounted_price || '';
             } else {
@@ -595,7 +595,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const statusCell = row.querySelector('td:nth-child(4)');  // Status column
         const expiryCell = row.querySelector('td:nth-child(3)');  // Expiry date column
         
-        if (statusCell && statusCell.textContent.trim() === 'Pending Expiry Date') {
+        if (statusCell && statusCell.textContent.trim() === '{{ STATUS_PENDING }}') {
             row.classList.add('bg-yellow-50');
         }
     });
@@ -606,7 +606,7 @@ document.getElementById('editExpiryDate').addEventListener('change', function() 
     const itemStatus = document.getElementById('editItemStatus').value;
     const helpText = document.getElementById('editExpiryDateHelp');
     
-    if (itemStatus === 'Active' || itemStatus === 'Expiring Soon') {
+    if (itemStatus === '{{ STATUS_ACTIVE }}' || itemStatus === '{{ STATUS_EXPIRING_SOON }}') {
         const selectedDate = new Date(this.value);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -653,47 +653,38 @@ document.getElementById('selectAll').addEventListener('change', function() {
     checkboxes.forEach(checkbox => checkbox.checked = this.checked);
 });
 
-document.getElementById('bulkDeleteBtn').addEventListener('click', async function() {
-    if (!bulkDeleteMode) {
-        toggleBulkDelete();
-        return;
-    }
-    
-    const selectedItems = Array.from(document.querySelectorAll('.item-checkbox:checked')).map(cb => cb.value);
+function deleteSelectedItems() {
+    const selectedItems = Array.from(document.querySelectorAll('input[name="item_ids"]:checked'))
+        .map(checkbox => checkbox.value);
     
     if (selectedItems.length === 0) {
-        alert('Please select at least one item to delete');
+        alert('Please select items to delete');
         return;
     }
     
-    if (selectedItems.length > 20) {
-        alert('You can only delete up to 20 items at once');
-        return;
-    }
-    
-    if (!confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/v1/items/bulk-delete', {
+    if (confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) {
+        fetch('/api/v1/inventory/bulk-delete', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
             },
             body: JSON.stringify({ item_ids: selectedItems })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+            } else {
+                alert(data.message);
+                location.reload();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while deleting items');
         });
-        
-        if (response.ok) {
-            window.location.reload();
-        } else {
-            const error = await response.json();
-            alert(error.error || 'Failed to delete items');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Failed to delete items');
     }
-});
+}
 </script>
 {% endblock %} 

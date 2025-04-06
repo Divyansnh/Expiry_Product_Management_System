@@ -4,6 +4,7 @@ from app.models.item import Item
 from app.models.notification import Notification
 from app.models.user import User
 from app.services.zoho_service import ZohoService
+from app.services.notification_service import NotificationService
 from flask import current_app
 
 def cleanup_expired_items():
@@ -18,13 +19,17 @@ def cleanup_expired_items():
             status='Expired'
         ).all()
         
+        notification_service = NotificationService()
+        
         for item in expired_items:
             # Create notification for the user
-            notification = Notification(
+            notification_service.create_notification(
                 user_id=item.user_id,
-                message=f"Item '{item.name}' (ID: {item.id}) has expired and will be removed from the system."
+                item_id=item.id,
+                message=f"Item '{item.name}' (ID: {item.id}) has expired and will be removed from the system.",
+                type='expiry',
+                priority='high'
             )
-            db.session.add(notification)
             
             # Mark item as inactive in Zoho if it has a Zoho ID
             if item.zoho_item_id:

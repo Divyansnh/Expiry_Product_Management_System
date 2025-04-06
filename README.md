@@ -37,8 +37,8 @@ A modern Flask-based web application for intelligent inventory management and ex
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/smart-inventory-manager.git
-cd smart-inventory-manager
+git clone https://github.com/Divyansnh/Expired_Product_Tracking_System.git
+cd Expired_Product_Tracking_System
 ```
 
 2. **Set up the environment**
