@@ -62,23 +62,25 @@ class NotificationService:
             
             # Check if we need to send a notification
             if days_until_expiry in self.notification_days:
-                notification = self._create_notification(item)
-                if notification:
-                    notifications.append(notification)
+                # Only create in-app notification if user has enabled them
+                if item.user.in_app_notifications:
+                    notification = self._create_notification(item)
+                    if notification:
+                        notifications.append(notification)
                     
-                    # Group notification by user
-                    if item.user.email_notifications:
-                        if item.user_id not in user_notifications:
-                            user_notifications[item.user_id] = {
-                                'expiring': [],
-                                'expired': []
-                            }
-                        
-                        user_notifications[item.user_id]['expiring'].append({
-                            'name': item.name,
-                            'days_until_expiry': days_until_expiry,
-                            'priority': notification.priority
-                        })
+                # Group notification by user for email
+                if item.user.email_notifications:
+                    if item.user_id not in user_notifications:
+                        user_notifications[item.user_id] = {
+                            'expiring': [],
+                            'expired': []
+                        }
+                    
+                    user_notifications[item.user_id]['expiring'].append({
+                        'name': item.name,
+                        'days_until_expiry': days_until_expiry,
+                        'priority': notification.priority if notification else 'normal'
+                    })
         
         # Send batched email notifications
         for user_id, data in user_notifications.items():
@@ -140,12 +142,13 @@ class NotificationService:
             priority = 'low'
             message = f"Info: Product {item.name} (ID: {item.id}) expires in {days_until_expiry} days."
         
-        # Check if notification already exists for this specific day
-        existing = Notification.query.filter_by(
-            item_id=item.id,
-            type='in_app',
-            status='pending',
-            message=message
+        # Check if a similar notification already exists for today
+        today = datetime.utcnow().date()
+        existing = Notification.query.filter(
+            Notification.item_id == item.id,
+            Notification.type == 'in_app',
+            Notification.status == 'pending',
+            db.func.date(Notification.created_at) == today
         ).first()
         
         if existing:
@@ -156,7 +159,8 @@ class NotificationService:
             type='in_app',
             priority=priority,
             user_id=item.user_id,
-            item_id=item.id
+            item_id=item.id,
+            status='pending'
         )
         
         db.session.add(notification)
@@ -199,19 +203,25 @@ class NotificationService:
         # This would use Flask-Mail or similar
         return False
     
-    def get_user_notifications(self, user: Union[User, int], limit: int = 10) -> List[Notification]:
-        """Get recent notifications for a user.
+    def get_user_notifications(self, user_id: int, limit: Optional[int] = None) -> List[Notification]:
+        """Get notifications for a user.
         
         Args:
-            user: Either a User object or a user ID
-            limit: Maximum number of notifications to return
+            user_id: ID of the user
+            limit: Optional limit on number of notifications to return
+            
+        Returns:
+            List of notifications, optionally limited in number
         """
-        user_id = user.id if isinstance(user, User) else user
-        return Notification.query.filter_by(
-            user_id=user_id
-        ).order_by(
-            Notification.created_at.desc()
-        ).limit(limit).all()
+        # Get user preferences
+        user = User.query.get(user_id)
+        if not user or not user.in_app_notifications:
+            return []
+            
+        query = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc())
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
     
     def mark_notification_read(self, notification_id: int, user_id: int) -> bool:
         """Mark a notification as read."""
@@ -261,21 +271,6 @@ class NotificationService:
         except Exception as e:
             db.session.rollback()
             return None
-
-    def get_user_notifications(self, user_id: int, limit: Optional[int] = None) -> List[Notification]:
-        """Get notifications for a user.
-        
-        Args:
-            user_id: ID of the user
-            limit: Optional limit on number of notifications to return
-            
-        Returns:
-            List of notifications, optionally limited in number
-        """
-        query = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc())
-        if limit is not None:
-            query = query.limit(limit)
-        return query.all()
 
     def mark_as_read(self, notification_id: int) -> bool:
         """Mark a notification as read."""

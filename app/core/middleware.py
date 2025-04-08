@@ -50,9 +50,22 @@ def handle_cors(app):
     """Handle CORS headers."""
     @app.after_request
     def after_request(response):
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        origin = request.headers.get('Origin')
+        if origin:
+            # Only allow specific origins in production
+            if app.debug:
+                response.headers.add('Access-Control-Allow-Origin', origin)
+            else:
+                allowed_origins = app.config.get('ALLOWED_ORIGINS', [])
+                if origin in allowed_origins:
+                    response.headers.add('Access-Control-Allow-Origin', origin)
+            
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-CSRFToken')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+            response.headers.add('Access-Control-Expose-Headers', 'Set-Cookie')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            response.headers.add('Vary', 'Origin')
         return response
 
 def rate_limit():

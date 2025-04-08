@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from flask import current_app, session, request
 from flask_login import current_user
 from app.core.extensions import db
-from app.models.item import Item
+from app.models.item import Item, STATUS_EXPIRED, STATUS_ACTIVE, STATUS_EXPIRING_SOON, STATUS_PENDING
 from app.models.user import User
 from urllib.parse import urlencode
 
@@ -133,16 +133,17 @@ class ZohoService:
             return None
     
     def sync_inventory(self, user: User) -> bool:
-        """Sync inventory with Zoho"""
+        """Sync inventory with Zoho."""
         try:
+            current_app.logger.info("Fetching inventory data from Zoho")
+            
             # Get access token
             access_token = self.get_access_token()
             if not access_token:
                 current_app.logger.error("No access token available")
                 return False
-
+            
             # Fetch inventory data from Zoho
-            current_app.logger.info("Fetching inventory data from Zoho")
             response = requests.get(
                 f"{self.base_url}/items",
                 headers={
@@ -157,7 +158,7 @@ class ZohoService:
             if response.status_code == 401:
                 current_app.logger.error("Unauthorized - token may be invalid")
                 return False
-                
+            
             if response.status_code != 200:
                 current_app.logger.error(f"Failed to fetch inventory: {response.status_code} - {response.text}")
                 return False
@@ -170,67 +171,65 @@ class ZohoService:
                     
                 items = data['items']
                 current_app.logger.info(f"Successfully fetched {len(items)} active items from Zoho")
+                
+                # Get all local items for this user
+                local_items = {item.name.lower(): item for item in Item.query.filter_by(user_id=user.id).all()}
+                
+                for zoho_item in items:
+                    item_name = zoho_item['name']
+                    current_app.logger.info(f"Processing item: {item_name}")
+                    
+                    # Check if item exists locally
+                    local_item = local_items.get(item_name.lower())
+                    
+                    if local_item:
+                        # Only update Zoho-specific fields, preserve local changes
+                        current_app.logger.info(f"Updating existing item: {item_name} (Zoho ID: {zoho_item['item_id']})")
+                        local_item.zoho_item_id = zoho_item['item_id']
+                        
+                        # Never overwrite these fields from Zoho
+                        protected_fields = [
+                            'quantity',
+                            'unit',
+                            'cost_price',
+                            'selling_price',
+                            'status',
+                            'location',
+                            'notes',
+                            'purchase_price',
+                            'expiry_date'
+                        ]
+                        
+                        # Only update non-protected fields
+                        if not local_item.updated_at or (datetime.now() - local_item.updated_at).total_seconds() > 300:  # 5 minutes
+                            local_item.name = zoho_item['name']
+                            local_item.description = zoho_item.get('description', '')
+                        
+                        db.session.add(local_item)
+                    else:
+                        # Create new item
+                        current_app.logger.info(f"Creating new item: {item_name}")
+                        item = Item(
+                            name=zoho_item['name'],
+                            description=zoho_item.get('description', ''),
+                            quantity=float(zoho_item.get('stock_on_hand', 0)),
+                            unit=zoho_item.get('unit', ''),
+                            selling_price=float(zoho_item.get('rate', 0)),
+                            cost_price=float(zoho_item.get('purchase_rate', 0)),
+                            expiry_date=datetime.strptime(zoho_item['expiry_date'], '%Y-%m-%d').date() if zoho_item.get('expiry_date') else None,
+                            status=STATUS_ACTIVE,  # New items start as active
+                            zoho_item_id=zoho_item['item_id'],
+                            user_id=user.id
+                        )
+                        db.session.add(item)
+                
+                db.session.commit()
+                current_app.logger.info("Successfully synced inventory with Zoho")
+                return True
+                
             except json.JSONDecodeError as e:
                 current_app.logger.error(f"Failed to parse inventory response: {response.text}")
                 return False
-            
-            # Get existing items for this user
-            existing_items = Item.query.filter_by(user_id=user.id).all()
-            existing_item_map = {item.zoho_item_id: item for item in existing_items}
-            
-            # Track processed items to identify items to deactivate
-            processed_zoho_ids = set()
-            
-            for item_data in items:
-                try:
-                    # Extract item details
-                    zoho_item_id = str(item_data.get('item_id'))
-                    name = item_data.get('name', '')
-                    description = item_data.get('description', '')
-                    unit = item_data.get('unit', '')
-                    rate = float(item_data.get('rate', 0))
-                    purchase_rate = float(item_data.get('purchase_rate', 0))
-                    stock_on_hand = float(item_data.get('stock_on_hand', 0))
-                    status = item_data.get('status', 'active')
-                    
-                    # Create or update item
-                    item = existing_item_map.get(zoho_item_id)
-                    if not item:
-                        item = Item()
-                        item.user_id = user.id
-                        item.zoho_item_id = zoho_item_id
-                        item.name = name
-                        item.description = description
-                        item.unit = unit
-                        item.selling_price = rate
-                        item.cost_price = purchase_rate
-                        item.quantity = stock_on_hand
-                        item.status = status
-                        db.session.add(item)
-                    else:
-                        # Update existing item
-                        item.name = name
-                        item.description = description
-                        item.unit = unit
-                        item.selling_price = rate
-                        item.cost_price = purchase_rate
-                        item.quantity = stock_on_hand
-                        item.status = status
-                    
-                    processed_zoho_ids.add(zoho_item_id)
-                    
-                except Exception as e:
-                    current_app.logger.error(f"Error processing item {zoho_item_id}: {str(e)}")
-                    continue
-            
-            # Mark items not in Zoho as inactive
-            for item in existing_items:
-                if item.zoho_item_id not in processed_zoho_ids:
-                    item.status = 'inactive'
-            
-            db.session.commit()
-            current_app.logger.info(f"Successfully synced inventory for user {user.id}")
-            return True
             
         except Exception as e:
             current_app.logger.error(f"Error syncing inventory: {str(e)}")
@@ -387,22 +386,38 @@ class ZohoService:
             current_app.logger.error(f"Error getting item from Zoho: {str(e)}")
             return None
 
-    def create_item_in_zoho(self, item_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def create_item_in_zoho(self, item_data: Dict[str, Any]) -> Optional[Dict]:
         """Create a new item in Zoho Inventory."""
         access_token = self.get_access_token()
         if not access_token:
             current_app.logger.error("No access token available")
             return None
-            
+        
         try:
-            current_app.logger.info(f"Creating item in Zoho with status: {item_data.get('status', 'active')}")
+            current_app.logger.info(f"Creating item in Zoho: {item_data['name']}")
             
-            # Check if item already exists in Zoho (both active and inactive)
+            # Check if item already exists
             existing_item = self.get_item_by_name(item_data['name'])
             if existing_item:
+                # Check if item exists in local database
+                local_item = Item.query.filter_by(zoho_item_id=existing_item['item_id']).first()
+                if local_item:
+                    # Update existing local item
+                    local_item.name = item_data['name']
+                    local_item.description = item_data.get('description', '')
+                    local_item.quantity = float(item_data.get('quantity', 0))
+                    local_item.unit = item_data['unit']
+                    local_item.selling_price = float(item_data['selling_price'])
+                    local_item.cost_price = float(item_data.get('cost_price', 0))
+                    local_item.expiry_date = datetime.strptime(item_data['expiry_date'], '%Y-%m-%d').date()
+                    local_item.status = item_data.get('status', 'active')
+                    db.session.commit()
+                    current_app.logger.info(f"Updated existing local item: {local_item.name}")
+                    return existing_item
+                
                 if existing_item.get('status') == 'inactive':
                     current_app.logger.info(f"Found inactive item '{item_data['name']}' in Zoho. Reactivating it.")
-                    # Reactivate the item
+                    # Reactivate the item and update all details including stock
                     response = requests.put(
                         f"{self.base_url}/items/{existing_item['item_id']}",
                         headers={
@@ -414,8 +429,10 @@ class ZohoService:
                             "name": item_data['name'],
                             "unit": item_data['unit'],
                             "rate": float(item_data['selling_price']),
+                            "purchase_rate": float(item_data.get('cost_price', 0)),
                             "description": item_data.get('description', ''),
-                            "stock_on_hand": float(item_data['quantity'])
+                            "initial_stock": float(item_data['quantity']),
+                            "initial_stock_rate": float(item_data.get('cost_price', 0))
                         }
                     )
                     
@@ -433,22 +450,19 @@ class ZohoService:
             current_date = datetime.now().date()
             status = "inactive" if expiry_date <= current_date else "active"
             
-            # Create item with only essential fields
+            # Create item with basic details and initial stock
             request_data = {
                 "name": item_data['name'],
                 "unit": item_data['unit'],
                 "rate": float(item_data['selling_price']),
+                "purchase_rate": float(item_data.get('cost_price', 0)),
                 "description": item_data.get('description', ''),
                 "status": status,
                 "item_type": "inventory",
-                "product_type": "goods"
+                "product_type": "goods",
+                "initial_stock": float(item_data['quantity']),
+                "initial_stock_rate": float(item_data.get('cost_price', 0))
             }
-            
-            # Add stock information
-            if item_data.get('quantity'):
-                request_data["initial_stock"] = float(item_data['quantity'])
-                if item_data.get('cost_price'):
-                    request_data["initial_stock_rate"] = float(item_data['cost_price'])
             
             current_app.logger.info(f"Creating item in Zoho with data: {request_data}")
             
@@ -463,8 +477,9 @@ class ZohoService:
             
             if response.status_code == 201:
                 data = response.json()
+                item = data.get('item')
                 current_app.logger.info(f"Successfully created item in Zoho: {data}")
-                return data.get('item')
+                return item
             elif response.status_code == 401:
                 current_app.logger.info("Token expired, attempting to refresh")
                 if self.refresh_token():
@@ -477,36 +492,31 @@ class ZohoService:
             current_app.logger.error(f"Error creating item in Zoho: {str(e)}")
             return None
 
-    def update_item_in_zoho(self, zoho_item_id: str, item_data: Dict[str, Any]) -> bool:
+    def update_item_in_zoho(self, item_id: str, item_data: Dict[str, Any]) -> Optional[Dict]:
         """Update an existing item in Zoho Inventory."""
         access_token = self.get_access_token()
         if not access_token:
             current_app.logger.error("No access token available")
-            return False
+            return None
         
         try:
-            current_app.logger.info(f"Updating item {zoho_item_id} in Zoho")
+            current_app.logger.info(f"Updating item in Zoho: {item_id}")
             
-            # Determine status based on expiry date
-            expiry_date = datetime.strptime(item_data['expiry_date'], '%Y-%m-%d').date()
-            current_date = datetime.now().date()
-            status = "inactive" if expiry_date <= current_date else "active"
-            
-            # Prepare the update data
+            # First update the item details
             update_data = {
                 "name": item_data['name'],
                 "unit": item_data['unit'],
-                "stock_on_hand": item_data['quantity'],
+                "rate": float(item_data['selling_price']),
+                "purchase_rate": float(item_data.get('cost_price', 0)),
                 "description": item_data.get('description', ''),
-                "status": status
+                "initial_stock": float(item_data['quantity']),
+                "initial_stock_rate": float(item_data.get('cost_price', 0))
             }
             
-            # Only include rate if selling_price is provided
-            if 'selling_price' in item_data and item_data['selling_price'] is not None:
-                update_data["rate"] = float(item_data['selling_price'])
+            current_app.logger.info(f"Updating item details: {update_data}")
             
             response = requests.put(
-                f"{self.base_url}/items/{zoho_item_id}",
+                f"{self.base_url}/items/{item_id}",
                 headers={
                     'Authorization': f'Bearer {access_token}',
                     'Content-Type': 'application/json'
@@ -515,35 +525,54 @@ class ZohoService:
             )
             
             if response.status_code == 200:
-                current_app.logger.info(f"Successfully updated item {zoho_item_id} in Zoho with status: {status}")
-                
-                # Update local item status if it exists
-                local_item = Item.query.filter_by(zoho_item_id=zoho_item_id).first()
-                if local_item:
-                    local_item.update_status(force_update=True)
-                
-                return True
+                current_app.logger.info(f"Successfully updated item details in Zoho: {response.json()}")
+                return response.json()
             elif response.status_code == 401:
                 current_app.logger.info("Token expired, attempting to refresh")
                 if self.refresh_token():
-                    return self.update_item_in_zoho(zoho_item_id, item_data)
+                    return self.update_item_in_zoho(item_id, item_data)
             
             current_app.logger.error(f"Failed to update item in Zoho: {response.status_code} - {response.text}")
-            return False
+            return None
             
         except Exception as e:
             current_app.logger.error(f"Error updating item in Zoho: {str(e)}")
-            return False
+            return None
 
     def delete_item_in_zoho(self, zoho_item_id: str) -> bool:
-        """Mark an item as inactive in Zoho Inventory."""
+        """Mark an item as inactive in Zoho."""
         access_token = self.get_access_token()
         if not access_token:
             current_app.logger.error("No access token available")
             return False
         
         try:
-            current_app.logger.info(f"Marking item {zoho_item_id} as inactive in Zoho")
+            # First check if the item exists in Zoho
+            response = requests.get(
+                f"{self.base_url}/items/{zoho_item_id}",
+                headers={
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'application/json'
+                }
+            )
+            
+            current_app.logger.info(f"Checking item existence in Zoho. Status: {response.status_code}")
+            
+            if response.status_code == 404:
+                # Item doesn't exist in Zoho, consider it deleted
+                current_app.logger.info(f"Item {zoho_item_id} not found in Zoho, considering it deleted")
+                return True
+            
+            if response.status_code == 401:
+                current_app.logger.info("Token expired, attempting to refresh")
+                if self.refresh_token():
+                    return self.delete_item_in_zoho(zoho_item_id)
+            
+            if response.status_code != 200:
+                current_app.logger.error(f"Failed to check item existence in Zoho: {response.status_code} - {response.text}")
+                return False
+            
+            # If item exists, mark it as inactive
             response = requests.put(
                 f"{self.base_url}/items/{zoho_item_id}",
                 headers={
@@ -554,6 +583,8 @@ class ZohoService:
                     "status": "inactive"
                 }
             )
+            
+            current_app.logger.info(f"Marking item as inactive. Status: {response.status_code}")
             
             if response.status_code == 200:
                 current_app.logger.info(f"Successfully marked item {zoho_item_id} as inactive in Zoho")
@@ -692,30 +723,31 @@ class ZohoService:
             return None
             
         try:
-            headers = {
-                'Authorization': f'Bearer {access_token}',
-                'Content-Type': 'application/json'
-            }
-            
-            url = f"{self.base_url}{endpoint}"
             response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=data if data else None,
-                params=params if params else None
+                method,
+                f"{self.base_url}/{endpoint}",
+                headers={
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'application/json'
+                },
+                json=data,
+                params=params
             )
             
-            if response.status_code == 200:
+            if response.status_code == 401:
+                current_app.logger.error("Unauthorized - token may be invalid")
+                return None
+                
+            if response.status_code != 200:
+                current_app.logger.error(f"Request failed: {response.status_code} - {response.text}")
+                return None
+                
+            try:
                 return response.json()
-            elif response.status_code == 401:
-                # Token expired, try to refresh
-                if self.refresh_token():
-                    return self._make_request(method, endpoint, data, params)
-                    
-            current_app.logger.error(f"API request failed: {response.status_code} - {response.text}")
-            return None
-            
-        except Exception as e:
-            current_app.logger.error(f"Error making API request: {str(e)}")
+            except json.JSONDecodeError:
+                current_app.logger.error(f"Failed to parse response: {response.text}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            current_app.logger.error(f"Error making request: {str(e)}")
             return None 

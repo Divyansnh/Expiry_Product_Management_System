@@ -59,6 +59,7 @@
         <div class="bg-white rounded-lg shadow p-6 mb-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Notification Preferences</h2>
             <form method="POST" action="{{ url_for('main.update_notification_settings') }}" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="flex items-center justify-between">
                     <div>
                         <label class="text-sm font-medium text-gray-700">Email Notifications</label>
@@ -107,6 +108,7 @@
         <div class="bg-white rounded-lg shadow p-6">
             <h2 class="text-xl font-semibold text-gray-900 mb-4">Account Settings</h2>
             <form method="POST" action="{{ url_for('main.settings') }}" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div>
                     <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
                     <input type="text" name="username" id="username" value="{{ current_user.username }}"

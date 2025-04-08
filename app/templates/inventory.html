@@ -3,27 +3,75 @@
 {% block title %}Inventory - Expiry Tracker{% endblock %}
 
 {% block content %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Add validation for expiry date input
+    const expiryDateInput = document.getElementById('expiry_date');
+    if (expiryDateInput) {
+        expiryDateInput.addEventListener('change', function() {
+            const selectedDate = new Date(this.value);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);  // Reset time part for fair comparison
+            
+            if (selectedDate <= today) {
+                this.setCustomValidity('Expiry date must be in the future');
+            } else {
+                this.setCustomValidity('');
+            }
+        });
+    }
+    
+    // Show warning for items without expiry dates
+    document.querySelectorAll('tr').forEach(row => {
+        const statusCell = row.querySelector('td:nth-child(4)');  // Status column
+        const expiryCell = row.querySelector('td:nth-child(3)');  // Expiry date column
+        
+        if (statusCell && statusCell.textContent.trim() === '{{ STATUS_PENDING }}') {
+            row.classList.add('bg-yellow-50');
+        }
+    });
+});
+</script>
+
 <div class="container mx-auto px-4 py-8">
     {% if not current_user.zoho_access_token %}
-        <div class="bg-white rounded-lg shadow p-8 text-center">
-            <h2 class="text-2xl font-bold text-gray-800 mb-4">Connect to Zoho</h2>
-            <p class="text-gray-600 mb-6">Please connect your Zoho account to manage your inventory.</p>
-            <a href="{{ url_for('main.settings') }}" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700">
-                Go to Settings
-            </a>
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-yellow-700">
+                        Zoho sync is not available. Please connect your Zoho account in Settings to sync your inventory.
+                        <a href="{{ url_for('main.settings') }}" class="font-medium underline text-yellow-700 hover:text-yellow-600">
+                            Go to Settings
+                        </a>
+                    </p>
+                </div>
+            </div>
         </div>
     {% else %}
         <div class="flex justify-end items-center mb-6">
             <div class="flex space-x-4">
-                <a href="{{ url_for('reports.reports') }}" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
+                <a href="{{ url_for('reports.reports') }}" class="original-button bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">
                     View Reports
                 </a>
                 <button id="bulkDeleteBtn" onclick="toggleBulkDelete()"
                         class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
                     Bulk Delete
                 </button>
+                <button id="deleteSelectedBtn" onclick="deleteSelectedItems()" style="display: none;"
+                        class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                    Delete Selected
+                </button>
+                <button id="cancelBulkDeleteBtn" onclick="cancelBulkDelete()" style="display: none;"
+                        class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">
+                    Cancel
+                </button>
                 <button onclick="document.getElementById('addItemModal').classList.remove('hidden')"
-                        class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        class="original-button bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                     Add Item
                 </button>
             </div>
@@ -59,7 +107,7 @@
                 <thead class="bg-gray-50">
                     <tr>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <input type="checkbox" id="selectAll" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" style="display: none;">
                         </th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
@@ -75,7 +123,7 @@
                     {% for item in items %}
                         <tr>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <input type="checkbox" class="item-checkbox rounded border-gray-300 text-blue-600 focus:ring-blue-500" value="{{ item.id }}">
+                                <input type="checkbox" class="item-checkbox rounded border-gray-300 text-blue-600 focus:ring-blue-500" value="{{ item.id }}" style="display: none;">
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm font-medium text-gray-900">{{ item.name }}</div>
@@ -109,20 +157,20 @@
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                {% if item.status == STATUS_PENDING %}
+                                {% if item.status == 'pending_expiry_date' %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
                                         Pending Expiry Date
                                     </span>
                                     <p class="text-xs text-gray-500 mt-1">Please set expiry date within 24 hours</p>
-                                {% elif item.status == STATUS_EXPIRING_SOON %}
+                                {% elif item.status == 'expiring_soon' %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-orange-100 text-orange-800">
                                         Expiring Soon
                                     </span>
-                                {% elif item.status == STATUS_ACTIVE %}
+                                {% elif item.status == 'active' %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                                         Active
                                     </span>
-                                {% elif item.status == STATUS_EXPIRED %}
+                                {% elif item.status == 'expired' %}
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
                                         Expired
                                     </span>
@@ -133,12 +181,15 @@
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                <button onclick="editItem({{ item.id }})" 
+                                <button data-action="edit" data-item-id="{{ item.id }}" 
                                         class="text-blue-600 hover:text-blue-900 mr-3"
                                         {% if item.status not in [STATUS_ACTIVE, STATUS_EXPIRING_SOON, STATUS_PENDING] %}disabled{% endif %}>
                                     Edit
                                 </button>
-                                <button onclick="deleteItem({{ item.id }})" class="text-red-600 hover:text-red-900">Delete</button>
+                                <button data-action="delete" data-item-id="{{ item.id }}" 
+                                        class="text-red-600 hover:text-red-900">
+                                    Delete
+                                </button>
                             </td>
                         </tr>
                     {% else %}
@@ -159,7 +210,8 @@
     <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
         <div class="mt-3">
             <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Add New Item</h3>
-            <form id="addItemForm" class="space-y-4">
+            <form id="addItemForm" action="{{ url_for('main.add_item') }}" method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div>
                     <label for="name" class="block text-sm font-medium text-gray-700">Name *</label>
                     <input type="text" id="name" name="name" required
@@ -198,6 +250,7 @@
                     <label for="expiry_date" class="block text-sm font-medium text-gray-700">Expiry Date *</label>
                     <input type="date" id="expiry_date" name="expiry_date" required
                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                    <p id="expiryDateHelp" class="mt-1 text-sm text-gray-500"></p>
                 </div>
                 <div class="flex justify-end space-x-3">
                     <button type="button" onclick="closeAddModal()"
@@ -314,86 +367,54 @@ function validateDecimalPlaces(input, maxDecimals) {
 
 document.getElementById('addItemForm').addEventListener('submit', async function(e) {
     e.preventDefault();
+    
+    // Get form data
     const formData = new FormData(this);
+    const name = formData.get('name');
     
     // Validate required fields
-    const name = formData.get('name');
-    const quantity = formData.get('quantity');
-    const unit = formData.get('unit');
-    const costPrice = formData.get('cost_price');
-    const sellingPrice = formData.get('selling_price');
-    const expiryDate = formData.get('expiry_date');
-    
-    if (!name || !quantity || !unit || !costPrice || !sellingPrice || !expiryDate) {
-        alert('Please fill in all required fields');
-        return;
+    const requiredFields = ['name', 'unit', 'quantity', 'cost_price', 'selling_price', 'expiry_date'];
+    for (const field of requiredFields) {
+        if (!formData.get(field)) {
+            alert(`Please fill in the ${field.replace('_', ' ')} field`);
+            return;
+        }
     }
-    
-    // Validate numeric fields
-    if (isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0) {
-        alert('Quantity must be a positive number');
-        return;
-    }
-    
-    if (isNaN(parseFloat(costPrice)) || parseFloat(costPrice) <= 0) {
-        alert('Cost price must be a positive number');
-        return;
-    }
-    
-    if (isNaN(parseFloat(sellingPrice)) || parseFloat(sellingPrice) <= 0) {
-        alert('Selling price must be a positive number');
-        return;
-    }
-    
-    // Validate decimal places for prices
-    if (costPrice.includes('.') && costPrice.split('.')[1].length > 2) {
-        alert('Cost price can only have up to 2 decimal places');
-        return;
-    }
-    
-    if (sellingPrice.includes('.') && sellingPrice.split('.')[1].length > 2) {
-        alert('Selling price can only have up to 2 decimal places');
-        return;
-    }
-    
-    // Validate expiry date
-    const expiryDateObj = new Date(expiryDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (expiryDateObj <= today) {
-        alert('Expiry date must be in the future');
-        return;
-    }
-    
-    const data = {
-        name: name,
-        quantity: parseFloat(quantity),
-        unit: unit,
-        cost_price: parseFloat(costPrice),
-        selling_price: parseFloat(sellingPrice),
-        description: formData.get('description'),
-        expiry_date: expiryDate
-    };
     
     try {
-        const response = await fetch('/api/v1/items', {
+        // Check if item exists
+        const response = await fetch('/api/v1/items/check', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
             },
-            body: JSON.stringify(data)
+            body: JSON.stringify({ name })
         });
         
-        if (response.ok) {
-            window.location.reload();
-        } else {
-            const error = await response.json();
-            alert(error.error || 'Failed to add item');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to check item existence');
         }
+        
+        const data = await response.json();
+        
+        if (data.exists) {
+            if (!confirm(`An item named "${name}" already exists. Do you want to update it?`)) {
+                return;
+            }
+            
+            // If updating, submit the form directly
+            this.submit();
+            return;
+        }
+        
+        // If creating new item, submit the form
+        this.submit();
+        
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to add item');
+        alert('An error occurred while adding/updating the item. Please try again.');
     }
 });
 
@@ -435,7 +456,8 @@ document.getElementById('editItemForm').addEventListener('submit', async functio
         const response = await fetch(`/update_item/${itemId}`, {
             method: 'PUT',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Edit-Operation': 'true'
             },
             body: JSON.stringify(data)
         });
@@ -553,10 +575,11 @@ document.getElementById('search').addEventListener('keyup', function(e) {
 document.getElementById('expiry_date').addEventListener('change', function() {
     const expiryDate = new Date(this.value);
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const helpText = document.getElementById('expiryDateHelp');
     
     if (expiryDate <= today) {
-        helpText.textContent = 'Expiry date must be in the future for active items';
+        helpText.textContent = 'Expiry date must be in the future';
         helpText.className = 'mt-1 text-sm text-red-500';
         this.setCustomValidity('Expiry date must be in the future');
     } else {
@@ -623,68 +646,148 @@ document.getElementById('editExpiryDate').addEventListener('change', function() 
     }
 });
 
-let bulkDeleteMode = false;
+let isBulkDeleteMode = false;
 
 function toggleBulkDelete() {
-    bulkDeleteMode = !bulkDeleteMode;
+    isBulkDeleteMode = !isBulkDeleteMode;
     const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
     const checkboxes = document.querySelectorAll('.item-checkbox');
+    const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    const cancelBulkDeleteBtn = document.getElementById('cancelBulkDeleteBtn');
     const selectAllCheckbox = document.getElementById('selectAll');
+    const originalButtons = document.querySelectorAll('.original-button');
     
-    if (bulkDeleteMode) {
-        bulkDeleteBtn.textContent = 'Delete Selected';
-        bulkDeleteBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
-        bulkDeleteBtn.classList.add('bg-green-600', 'hover:bg-green-700');
-        checkboxes.forEach(checkbox => checkbox.disabled = false);
-        selectAllCheckbox.disabled = false;
+    if (isBulkDeleteMode) {
+        bulkDeleteBtn.style.display = 'none'; // Hide Bulk Delete button
+        checkboxes.forEach(checkbox => checkbox.style.display = 'block');
+        deleteSelectedBtn.style.display = 'inline-block';
+        cancelBulkDeleteBtn.style.display = 'inline-block';
+        selectAllCheckbox.style.display = 'block';
+        // Hide original buttons
+        originalButtons.forEach(button => button.style.display = 'none');
     } else {
-        bulkDeleteBtn.textContent = 'Bulk Delete';
-        bulkDeleteBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
-        bulkDeleteBtn.classList.add('bg-red-600', 'hover:bg-red-700');
-        checkboxes.forEach(checkbox => checkbox.disabled = true);
-        selectAllCheckbox.disabled = true;
+        bulkDeleteBtn.style.display = 'inline-block'; // Show Bulk Delete button
+        checkboxes.forEach(checkbox => {
+            checkbox.style.display = 'none';
+            checkbox.checked = false;
+        });
+        deleteSelectedBtn.style.display = 'none';
+        cancelBulkDeleteBtn.style.display = 'none';
+        selectAllCheckbox.style.display = 'none';
         selectAllCheckbox.checked = false;
-        checkboxes.forEach(checkbox => checkbox.checked = false);
+        // Show original buttons
+        originalButtons.forEach(button => button.style.display = 'inline-block');
     }
 }
 
+function cancelBulkDelete() {
+    isBulkDeleteMode = false;
+    const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+    const checkboxes = document.querySelectorAll('.item-checkbox');
+    const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    const cancelBulkDeleteBtn = document.getElementById('cancelBulkDeleteBtn');
+    const selectAllCheckbox = document.getElementById('selectAll');
+    const originalButtons = document.querySelectorAll('.original-button');
+    
+    bulkDeleteBtn.style.display = 'inline-block'; // Show Bulk Delete button
+    checkboxes.forEach(checkbox => {
+        checkbox.style.display = 'none';
+        checkbox.checked = false;
+    });
+    deleteSelectedBtn.style.display = 'none';
+    cancelBulkDeleteBtn.style.display = 'none';
+    selectAllCheckbox.style.display = 'none';
+    selectAllCheckbox.checked = false;
+    // Show original buttons
+    originalButtons.forEach(button => button.style.display = 'inline-block');
+}
+
+function deleteSelectedItems() {
+    if (!isBulkDeleteMode) return;
+    
+    const selectedItems = Array.from(document.querySelectorAll('.item-checkbox:checked'))
+        .map(checkbox => parseInt(checkbox.value));
+    
+    if (selectedItems.length === 0) {
+        alert('Please select at least one item to delete');
+        return;
+    }
+    
+    // Get the CSRF token from the meta tag
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    console.log('CSRF Token:', csrfToken ? 'Token exists' : 'No CSRF token found');
+    
+    if (!csrfToken) {
+        alert('CSRF token missing. Please refresh the page and try again.');
+        return;
+    }
+    
+    // Log the request data for debugging
+    console.log('Sending bulk delete request with items:', selectedItems);
+    
+    fetch('/api/v1/items/bulk-delete', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+            item_ids: selectedItems
+        })
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+        return response.json().then(data => {
+            console.log('Response data:', data);
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to delete items');
+            }
+            return data;
+        });
+    })
+    .then(data => {
+        console.log('Success response:', data);
+        alert(data.message);
+        window.location.reload();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert(error.message || 'An error occurred while deleting items');
+        // Reset bulk delete mode
+        cancelBulkDelete();
+    });
+}
+
+// Add event listener for bulk delete button
+document.getElementById('bulkDeleteBtn').addEventListener('click', () => {
+    if (isBulkDeleteMode) {
+        deleteSelectedItems();
+    } else {
+        toggleBulkDelete();
+    }
+});
+
+// Add event listener for select all checkbox
 document.getElementById('selectAll').addEventListener('change', function() {
     const checkboxes = document.querySelectorAll('.item-checkbox');
     checkboxes.forEach(checkbox => checkbox.checked = this.checked);
 });
 
-function deleteSelectedItems() {
-    const selectedItems = Array.from(document.querySelectorAll('input[name="item_ids"]:checked'))
-        .map(checkbox => checkbox.value);
+// Add delegation for edit and delete buttons
+document.addEventListener('click', function(e) {
+    const button = e.target.closest('button[data-action]');
+    if (!button) return;
     
-    if (selectedItems.length === 0) {
-        alert('Please select items to delete');
-        return;
-    }
+    const action = button.dataset.action;
+    const itemId = button.dataset.itemId;
     
-    if (confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) {
-        fetch('/api/v1/inventory/bulk-delete', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token')}`
-            },
-            body: JSON.stringify({ item_ids: selectedItems })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                alert(data.error);
-            } else {
-                alert(data.message);
-                location.reload();
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('An error occurred while deleting items');
-        });
+    if (action === 'edit') {
+        editItem(itemId);
+    } else if (action === 'delete') {
+        deleteItem(itemId);
     }
-}
+});
 </script>
 {% endblock %} 

@@ -14,6 +14,7 @@ class Notification(BaseModel):
     priority = db.Column(db.String(10), default='medium')
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
+    status = db.Column(db.String(20), default='pending')
     
     # Relationships
     user = db.relationship('User', back_populates='notifications')

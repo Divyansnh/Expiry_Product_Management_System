@@ -21,7 +21,6 @@ class User(UserMixin, BaseModel):
     username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256))
-    password_salt = db.Column(db.String(256))  # Store salt separately
     is_active = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -80,33 +79,25 @@ class User(UserMixin, BaseModel):
             )
         # Generate a new salt for each password
         salt = bcrypt.gensalt()
-        self.password_salt = salt.decode('utf-8')
         self.password_hash = bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
     
     def verify_password(self, password: str) -> bool:
         """Verify a password against the stored hash."""
-        if not self.password_hash or not self.password_salt:
-            return False
-        
-        # Check if account is locked
-        if self.is_locked():
+        if not self.password_hash:
             return False
             
         # Verify password using bcrypt
-        is_valid = bcrypt.checkpw(
-            password.encode('utf-8'),
-            self.password_hash.encode('utf-8')
-        )
+        try:
+            is_valid = bcrypt.checkpw(
+                password.encode('utf-8'),
+                self.password_hash.encode('utf-8')
+            )
+        except ValueError:
+            # Handle potential invalid hash format
+            return False
         
         if is_valid:
-            self.login_attempts = 0
-            self.locked_until = None
             self.last_login = datetime.utcnow()
-            db.session.commit()
-        else:
-            self.login_attempts += 1
-            if self.login_attempts >= current_app.config['MAX_LOGIN_ATTEMPTS']:
-                self.locked_until = datetime.utcnow() + current_app.config['LOGIN_LOCKOUT_TIME']
             db.session.commit()
             
         return is_valid
@@ -115,14 +106,25 @@ class User(UserMixin, BaseModel):
         """Check if the account is currently locked."""
         if not self.locked_until:
             return False
-        return datetime.utcnow() < self.locked_until
+        # If lockout has expired, clear the lock
+        if datetime.utcnow() > self.locked_until:
+            self.locked_until = None
+            self.login_attempts = 0
+            db.session.commit()
+            return False
+        return True
     
     def get_lockout_time_remaining(self) -> Optional[timedelta]:
         """Get the remaining lockout time if account is locked."""
-        if not self.is_locked() or not self.locked_until:
+        if not self.locked_until:
             return None
-        remaining = self.locked_until - datetime.utcnow()
-        return remaining if remaining.total_seconds() > 0 else None
+        now = datetime.utcnow()
+        if now > self.locked_until:
+            self.locked_until = None
+            self.login_attempts = 0
+            db.session.commit()
+            return None
+        return self.locked_until - now
     
     def _is_strong_password(self, password: str) -> bool:
         """Check if password meets strength requirements."""

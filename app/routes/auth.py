@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, session, current_app
+from flask import Blueprint, render_template, redirect, url_for, flash, request, session, current_app, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from app.core.extensions import db, login_manager
 from app.models.user import User
@@ -35,10 +35,26 @@ def login():
             current_app.logger.warning(f"Login failed: User not found for email {email}")
             flash('Invalid email or password', 'danger')
             return render_template('auth/login.html', title='Login', form=form)
+
+        # Check if account is locked
+        if user.is_locked():
+            remaining_time = user.get_lockout_time_remaining()
+            if remaining_time:
+                minutes = int(remaining_time.total_seconds() / 60)
+                flash(f'Account is locked. Please try again in {minutes} minutes.', 'danger')
+                return render_template('auth/login.html', title='Login', form=form)
             
         if not user.verify_password(form.password.data):
             current_app.logger.warning(f"Login failed: Invalid password for user {user.username}")
-            flash('Invalid email or password', 'danger')
+            # Increment login attempts
+            user.login_attempts += 1
+            if user.login_attempts >= current_app.config['MAX_LOGIN_ATTEMPTS']:
+                user.locked_until = datetime.utcnow() + current_app.config['LOGIN_LOCKOUT_DURATION']
+                flash(f'Too many failed attempts. Account locked for {current_app.config["LOGIN_LOCKOUT_DURATION"].total_seconds() / 60} minutes.', 'danger')
+            else:
+                remaining_attempts = current_app.config['MAX_LOGIN_ATTEMPTS'] - user.login_attempts
+                flash(f'Invalid email or password. {remaining_attempts} attempts remaining.', 'danger')
+            db.session.commit()
             return render_template('auth/login.html', title='Login', form=form)
             
         current_app.logger.info(f"User found: {user.username}, is_verified: {user.is_verified}")
@@ -57,20 +73,27 @@ def login():
                 flash('Error sending verification email', 'error')
             return redirect(url_for('auth.verify_email'))
         
+        # Reset login attempts on successful login
+        user.login_attempts = 0
+        user.locked_until = None
+        
         # Set session to permanent if remember me is checked
         if form.remember_me.data:
             session.permanent = True
             current_app.permanent_session_lifetime = timedelta(hours=24)
         
+        # Login user and set session cookie
         login_user(user, remember=form.remember_me.data)
         
         # Update last login
         user.last_login = datetime.utcnow()
         db.session.commit()
         
+        # Get the next URL from the query parameters
         next_page = request.args.get('next')
         if not next_page or not next_page.startswith('/'):
             next_page = url_for('main.index')
+            
         return redirect(next_page)
         
     return render_template('auth/login.html', title='Login', form=form)
@@ -200,8 +223,17 @@ def resend_verification():
 @login_required
 def logout():
     """User logout."""
+    # Clear session
+    session.clear()
+    
+    # Logout user
     logout_user()
-    return redirect(url_for('main.index'))
+    
+    # Flash message
+    flash('You have been logged out.', 'info')
+    
+    # Redirect to login page
+    return redirect(url_for('auth.login'))
 
 @auth_bp.route('/zoho/login')
 @login_required
@@ -392,7 +424,8 @@ def reset_password_request():
 def reset_password(token):
     """Reset password with token."""
     if current_user.is_authenticated:
-        return redirect(url_for('main.index'))
+        flash('You are already logged in. Please log out to reset your password.', 'info')
+        return redirect(url_for('main.dashboard'))
         
     # Find user by token
     user = User.query.filter_by(password_reset_token=token).first()
@@ -409,7 +442,7 @@ def reset_password(token):
     if form.validate_on_submit():
         try:
             user.password = form.password.data
-            user.clear_password_reset_token()
+            user.clear_password_reset_token()  # Clear the token after successful password reset
             db.session.commit()
             
             # Send confirmation email

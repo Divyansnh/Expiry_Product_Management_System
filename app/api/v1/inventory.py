@@ -8,6 +8,10 @@ from app.services.zoho_service import ZohoService
 from app.services.notification_service import NotificationService
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from flask import current_app
+import logging
+
+logger = logging.getLogger(__name__)
 
 @api_bp.route('/inventory', methods=['GET'])
 @jwt_required()
@@ -31,43 +35,74 @@ def get_inventory():
 @jwt_required()
 def bulk_delete_items():
     """Delete multiple items."""
-    user_id = get_jwt_identity()
-    user: Optional[User] = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
-    data = request.get_json()
-    item_ids = data.get('item_ids', [])
-    
-    if not item_ids:
-        return jsonify({'error': 'No items selected'}), 400
+    current_user_id = get_jwt_identity()
+    logger.info(f"Bulk delete request from user {current_user_id}")
     
     try:
-        # Get items and verify ownership
-        items = Item.query.filter(
-            Item.id.in_(item_ids),
-            Item.user_id == user_id
-        ).all()
-        
+        data = request.get_json()
+        if not data or 'item_ids' not in data:
+            return jsonify({'error': 'Missing item_ids in request'}), 400
+            
+        item_ids = data['item_ids']
+        if not isinstance(item_ids, list):
+            return jsonify({'error': 'item_ids must be a list'}), 400
+            
+        # Convert string IDs to integers
+        try:
+            item_ids = [int(item_id) for item_id in item_ids]
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid item ID format'}), 400
+            
+        # Get all items at once to verify ownership
+        items = Item.query.filter(Item.id.in_(item_ids)).all()
         if not items:
-            return jsonify({'error': 'No valid items found'}), 404
-        
-        # Delete items from Zoho first
+            return jsonify({'error': 'No items found'}), 404
+            
+        # Verify all items belong to the current user
+        for item in items:
+            if item.user_id != current_user_id:
+                return jsonify({'error': 'Unauthorized access to items'}), 403
+                
+        # Get the user object
+        user = User.query.get(current_user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+                
+        # Initialize ZohoService with the user object
         zoho_service = ZohoService(user)
+        
+        # Track items that couldn't be deleted from Zoho
+        zoho_failures = []
+        
+        # First try to delete from Zoho
         for item in items:
             if item.zoho_item_id:
-                zoho_service.delete_item_in_zoho(item.zoho_item_id)
+                try:
+                    success = zoho_service.delete_item_in_zoho(item.zoho_item_id)
+                    if not success:
+                        zoho_failures.append(item.name)
+                except Exception as e:
+                    logger.error(f"Error deleting item {item.id} from Zoho: {str(e)}")
+                    zoho_failures.append(item.name)
         
-        # Delete items from local database
-        for item in items:
-            db.session.delete(item)
-        
-        db.session.commit()
-        return jsonify({'message': f'Successfully deleted {len(items)} items'})
+        # Delete from local database
+        try:
+            Item.query.filter(Item.id.in_(item_ids)).delete(synchronize_session=False)
+            db.session.commit()
+        except Exception as e:
+            logger.error(f"Error deleting items from database: {str(e)}")
+            db.session.rollback()
+            return jsonify({'error': 'Failed to delete items from database'}), 500
+            
+        # Prepare response message
+        message = f"Successfully deleted {len(items)} items from database"
+        if zoho_failures:
+            message += f", but failed to mark as inactive in Zoho for: {', '.join(zoho_failures)}"
+            
+        return jsonify({'message': message}), 200
         
     except Exception as e:
-        db.session.rollback()
+        logger.error(f"Error in bulk_delete_items: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @api_bp.route('/inventory/sync', methods=['POST'])

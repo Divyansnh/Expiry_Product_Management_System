@@ -6,10 +6,10 @@ from functools import lru_cache
 from typing import Optional, Union
 
 # Status constants
-STATUS_ACTIVE = 'Active'
-STATUS_EXPIRED = 'Expired'
-STATUS_EXPIRING_SOON = 'Expiring Soon'
-STATUS_PENDING = 'Pending Expiry Date'
+STATUS_ACTIVE = 'active'
+STATUS_EXPIRED = 'expired'
+STATUS_EXPIRING_SOON = 'expiring_soon'
+STATUS_PENDING = 'pending_expiry_date'
 
 # Time constants
 EXPIRING_SOON_DAYS = 30
@@ -71,6 +71,13 @@ class Item(BaseModel):
     notifications = db.relationship('Notification', back_populates='item', lazy='dynamic')
     user = db.relationship('User', back_populates='items')
     
+    def __init__(self, **kwargs):
+        """Initialize item with given parameters."""
+        super().__init__()
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+    
     @property
     def days_until_expiry(self) -> Optional[int]:
         """Calculate days until expiry with caching."""
@@ -102,27 +109,16 @@ class Item(BaseModel):
         """Convert item to dictionary."""
         current_date = datetime.now().date()
         days_until_expiry = None
-        status = 'Unknown'
+        status = self.status  # Use the stored status
+
+        # Log the type of expiry_date for debugging
+        current_app.logger.info(f"Item {self.id} ({self.name}) - Expiry date type: {type(self.expiry_date)}")
 
         if self.expiry_date:
             # Convert expiry_date to date if it's a datetime
             expiry_date = self.expiry_date.date() if isinstance(self.expiry_date, datetime) else self.expiry_date
-            if expiry_date <= current_date:
-                status = STATUS_EXPIRED
-            else:
-                days_until_expiry = (expiry_date - current_date).days
-                if days_until_expiry <= EXPIRING_SOON_DAYS:
-                    status = STATUS_EXPIRING_SOON
-                else:
-                    status = STATUS_ACTIVE
-        elif self.status_changed_at:
-            # If no expiry date but status changed within last 24 hours
-            hours_since_change = (datetime.now() - self.status_changed_at).total_seconds() / 3600
-            if hours_since_change <= PENDING_STATUS_HOURS:
-                status = STATUS_PENDING
-            else:
-                status = STATUS_EXPIRING_SOON
-                days_until_expiry = EXPIRING_SOON_DAYS  # Default to 30 days after grace period
+            days_until_expiry = (expiry_date - current_date).days
+            current_app.logger.info(f"Item {self.id} ({self.name}) - Days until expiry: {days_until_expiry}")
 
         data = super().to_dict()
         data.update({
@@ -131,8 +127,8 @@ class Item(BaseModel):
             'quantity': self.quantity,
             'unit': self.unit,
             'batch_number': self.batch_number,
-            'purchase_date': self.purchase_date.isoformat() if self.purchase_date else None,
-            'expiry_date': self.expiry_date.strftime('%Y-%m-%d') if self.expiry_date else None,
+            'purchase_date': self.purchase_date.isoformat() if isinstance(self.purchase_date, datetime) else self.purchase_date,
+            'expiry_date': self.expiry_date.isoformat() if isinstance(self.expiry_date, datetime) else self.expiry_date,
             'purchase_price': self.purchase_price,
             'selling_price': self.selling_price,
             'cost_price': self.cost_price,
@@ -146,6 +142,10 @@ class Item(BaseModel):
             'status': status,
             'zoho_item_id': self.zoho_item_id
         })
+        
+        # Log the final expiry_date value for debugging
+        current_app.logger.info(f"Item {self.id} ({self.name}) - Final expiry_date in dict: {data['expiry_date']}")
+        
         return data
     
     def __repr__(self):
@@ -186,28 +186,29 @@ class Item(BaseModel):
     
     def update_status(self, force_update: bool = False) -> None:
         """Update item status based on expiry date with optimized database calls."""
-        if not self.expiry_date:
-            self.status = STATUS_PENDING
-            return
-
         old_status = self.status
-        days_until_expiry = self.days_until_expiry
-
-        # Calculate new status
-        if days_until_expiry is None or days_until_expiry <= 0:
-            new_status = STATUS_EXPIRED
-        elif days_until_expiry <= EXPIRING_SOON_DAYS:
-            new_status = STATUS_EXPIRING_SOON
+        
+        # Always update status regardless of current status
+        if not self.expiry_date:
+            new_status = STATUS_PENDING
         else:
-            new_status = STATUS_ACTIVE
-
-        # Update status if changed or forced
-        if force_update or new_status != old_status:
+            days_until_expiry = self.days_until_expiry
+            current_app.logger.info(f"Item {self.id} ({self.name}) - Days until expiry: {days_until_expiry}")
+            
+            if days_until_expiry is None or days_until_expiry <= 0:
+                new_status = STATUS_EXPIRED
+            elif days_until_expiry <= 7:
+                new_status = STATUS_EXPIRING_SOON
+            else:
+                new_status = STATUS_ACTIVE
+        
+        # Update status if changed
+        if new_status != old_status:
             self.status = new_status
             self.status_changed_at = datetime.now()
             current_app.logger.info(
                 f"Item {self.id} ({self.name}) status changed from {old_status} to {new_status}. "
-                f"Days until expiry: {days_until_expiry}"
+                f"Days until expiry: {days_until_expiry if self.expiry_date else 'None'}"
             )
             
             # Create notification for status change
@@ -242,3 +243,45 @@ class Item(BaseModel):
                     zoho_service.update_item_status_in_zoho(self.zoho_item_id, zoho_status)
             
             db.session.commit() 
+
+    @classmethod
+    def find_existing_item(cls, name: str, user_id: int) -> Optional['Item']:
+        """Find an existing item with the same name for the given user.
+        
+        Args:
+            name (str): Item name to search for
+            user_id (int): ID of the user who owns the item
+            
+        Returns:
+            Optional[Item]: Existing item if found, None otherwise
+        """
+        return cls.query.filter(
+            cls.name.ilike(name),  # Case-insensitive search
+            cls.user_id == user_id
+        ).first()
+
+    @classmethod
+    def create_or_update(cls, name: str, user_id: int, **kwargs) -> tuple['Item', bool]:
+        """Create a new item or update an existing one with the same name.
+        
+        Args:
+            name (str): Item name
+            user_id (int): ID of the user who owns the item
+            **kwargs: Additional item attributes
+            
+        Returns:
+            tuple[Item, bool]: (Item object, is_new_item)
+        """
+        existing_item = cls.find_existing_item(name, user_id)
+        if existing_item:
+            # Update existing item
+            for key, value in kwargs.items():
+                if hasattr(existing_item, key):
+                    setattr(existing_item, key, value)
+            existing_item.update_status(force_update=True)
+            return existing_item, False
+            
+        # Create new item
+        new_item = cls(name=name, user_id=user_id, **kwargs)
+        new_item.update_status(force_update=True)
+        return new_item, True 

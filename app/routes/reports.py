@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, render_template, jsonify, request, current_app, url_for
 from flask_login import login_required, current_user
 from app.services.report_service import ReportService
+from app.core.extensions import db
 
 reports_bp = Blueprint('reports', __name__)
 report_service = ReportService()
@@ -44,4 +45,22 @@ def view_report(report_id):
     report = report_service.get_report(report_id)
     if not report or report.user_id != current_user.id:
         return jsonify({'error': 'Report not found'}), 404
-    return render_template('view_report.html', report=report, is_public=report.is_public) 
+    return render_template('view_report.html', report=report, is_public=report.is_public)
+
+@reports_bp.route('/reports/<int:report_id>/delete', methods=['POST'])
+@login_required
+def delete_report(report_id):
+    """Delete a specific report."""
+    try:
+        report = report_service.get_report(report_id)
+        if not report or report.user_id != current_user.id:
+            return jsonify({'error': 'Report not found'}), 404
+            
+        db.session.delete(report)
+        db.session.commit()
+        current_app.logger.info(f"Successfully deleted report {report_id}")
+        return jsonify({'message': 'Report deleted successfully'})
+    except Exception as e:
+        current_app.logger.error(f"Error deleting report: {str(e)}")
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500 

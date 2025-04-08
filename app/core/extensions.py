@@ -6,6 +6,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
 from flask_session import Session
+from flask_wtf.csrf import CSRFProtect
 import os
 from datetime import timedelta
 
@@ -17,45 +18,66 @@ scheduler = APScheduler()
 cors = CORS()
 jwt = JWTManager()
 mail = Mail()
+csrf = CSRFProtect()
 
 def init_extensions(app):
     """Initialize Flask extensions."""
-    cors.init_app(app)
-    jwt.init_app(app)
-    scheduler.init_app(app)
-    
-    # Configure login manager
-    login_manager.login_view = 'auth.login'
-    login_manager.login_message = 'Please log in to access this page.'
-    login_manager.login_message_category = 'info'
-    
-    # Configure session
-    app.config['SESSION_TYPE'] = 'filesystem'
-    app.config['SESSION_FILE_DIR'] = os.path.join(app.root_path, 'flask_session')
-    app.config['SESSION_FILE_THRESHOLD'] = 100
-    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
-    app.config['SESSION_COOKIE_SECURE'] = True
-    app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-    app.config['SESSION_COOKIE_NAME'] = 'expiry_tracker_session'
-    app.config['SESSION_COOKIE_MAX_AGE'] = 24 * 60 * 60  # 24 hours in seconds
-    app.config['SESSION_COOKIE_EXPIRES'] = timedelta(hours=24)
+    # Configure session first
+    if 'SESSION_TYPE' not in app.config:
+        app.config['SESSION_TYPE'] = 'filesystem'
+    if 'SESSION_FILE_DIR' not in app.config:
+        app.config['SESSION_FILE_DIR'] = os.path.join(app.root_path, 'flask_session')
+    if 'SESSION_FILE_THRESHOLD' not in app.config:
+        app.config['SESSION_FILE_THRESHOLD'] = 100
+    if 'PERMANENT_SESSION_LIFETIME' not in app.config:
+        app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+    if 'SESSION_COOKIE_NAME' not in app.config:
+        app.config['SESSION_COOKIE_NAME'] = 'expiry_tracker_session'
+    if 'SESSION_COOKIE_MAX_AGE' not in app.config:
+        app.config['SESSION_COOKIE_MAX_AGE'] = 24 * 60 * 60  # 24 hours in seconds
+    if 'SESSION_COOKIE_EXPIRES' not in app.config:
+        app.config['SESSION_COOKIE_EXPIRES'] = timedelta(hours=24)
     
     # Initialize session
     Session(app)
-
-    # Initialize database and migrations
+    
+    # Initialize database
     db.init_app(app)
+    
+    # Initialize login manager
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.login'
+    login_manager.login_message_category = 'info'
+    
+    # Initialize JWT manager
+    jwt.init_app(app)
+    
+    # Initialize migrations
     migrate.init_app(app, db)
     
-    # Initialize mail with debug logging
-    mail.init_app(app)
-    if app.debug:
-        print("Mail server configuration:")
-        print(f"MAIL_SERVER: {app.config['MAIL_SERVER']}")
-        print(f"MAIL_PORT: {app.config['MAIL_PORT']}")
-        print(f"MAIL_USE_TLS: {app.config['MAIL_USE_TLS']}")
-        print(f"MAIL_USERNAME: {app.config['MAIL_USERNAME']}")
-        print(f"MAIL_DEFAULT_SENDER: {app.config['MAIL_DEFAULT_SENDER']}")
+    # Initialize CORS with proper configuration
+    cors.init_app(app, supports_credentials=True, resources={
+        r"/*": {
+            "origins": ["http://localhost:5000", "http://127.0.0.1:5000"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-CSRFToken"],
+            "supports_credentials": True
+        }
+    })
     
-    login_manager.init_app(app) 
+    # Initialize mail
+    mail.init_app(app)
+    
+    # Log mail server configuration
+    print("Mail server configuration:")
+    print(f"MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
+    print(f"MAIL_PORT: {app.config.get('MAIL_PORT')}")
+    print(f"MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
+    print(f"MAIL_USERNAME: {app.config.get('MAIL_USERNAME')}")
+    print(f"MAIL_DEFAULT_SENDER: {app.config.get('MAIL_DEFAULT_SENDER')}")
+
+    # Initialize scheduler
+    scheduler.init_app(app)
+
+    # Initialize CSRF protection
+    csrf.init_app(app) 
