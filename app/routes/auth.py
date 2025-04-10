@@ -148,13 +148,18 @@ def register():
             
             # Send verification email
             try:
-                send_verification_email(user)
-                # Store email in session for verification
-                session['pending_verification_email'] = user.email
-                flash('Registration successful! Please check your email to verify your account.', 'success')
+                email_service = EmailService()
+                if email_service.send_verification_email(user):
+                    # Store email in session for verification
+                    session['pending_verification_email'] = user.email
+                    session.modified = True  # Ensure session is saved
+                    flash('Registration successful! Please check your email to verify your account.', 'success')
+                else:
+                    current_app.logger.error(f"Failed to send verification email to {user.email}")
+                    flash('Registration successful but verification email could not be sent. Please try resending the verification email.', 'warning')
             except Exception as e:
                 current_app.logger.error(f"Error sending verification email: {str(e)}")
-                flash('Registration successful! Please contact support to verify your account.', 'warning')
+                flash('Registration successful but verification email could not be sent. Please try resending the verification email.', 'warning')
             
             return redirect(url_for('auth.verify_email'))
             
@@ -172,20 +177,29 @@ def verify_email():
         return redirect(url_for('main.dashboard'))
         
     form = VerifyEmailForm()
-    if form.validate_on_submit():
-        # Get the current user's email from session or current_user
-        email = current_user.email if current_user.is_authenticated else session.get('pending_verification_email')
+    
+    # Get the email from session
+    email = session.get('pending_verification_email')
+    if not email and current_user.is_authenticated:
+        email = current_user.email
+        # Update session with the email
+        session['pending_verification_email'] = email
+        session.modified = True
+    
+    if not email:
+        flash('Email not found. Please try logging in again.', 'error')
+        return redirect(url_for('auth.login'))
         
-        if not email:
-            flash('Email not found. Please try logging in again.', 'error')
-            return redirect(url_for('auth.login'))
-            
+    if form.validate_on_submit():
         user = User.query.filter_by(email=email).first()
         if not user:
             flash('User not found. Please try registering again.', 'error')
             return redirect(url_for('auth.register'))
             
         if user.verify_code(form.verification_code.data):
+            # Clear the session after successful verification
+            session.pop('pending_verification_email', None)
+            session.modified = True
             flash('Email verified successfully', 'success')
             return redirect(url_for('auth.login'))
         else:
@@ -196,8 +210,14 @@ def verify_email():
 @auth_bp.route('/resend-verification', methods=['GET', 'POST'])
 def resend_verification():
     """Resend verification email."""
-    # Get email from session if available
+    # Get email from session
     email = session.get('pending_verification_email')
+    if not email and current_user.is_authenticated:
+        email = current_user.email
+        # Update session with the email
+        session['pending_verification_email'] = email
+        session.modified = True
+    
     if not email:
         flash('Email not found. Please try logging in again.', 'error')
         return redirect(url_for('auth.login'))
@@ -211,6 +231,10 @@ def resend_verification():
         flash('Email already verified', 'info')
         return redirect(url_for('auth.login'))
         
+    # Generate new verification code
+    user.generate_verification_code()
+    user.save()
+    
     email_service = EmailService()
     if email_service.send_verification_email(user):
         flash('Verification email sent. Please check your inbox.', 'success')

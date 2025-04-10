@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union, Dict, Any, Literal, TypedDict, Sequence, cast
 from flask import current_app
 from app.core.extensions import db
 from app.models.notification import Notification
@@ -7,26 +7,42 @@ from app.models.item import Item
 from app.models.user import User
 from app.services.email_service import EmailService
 
+class ItemNotification(TypedDict):
+    name: str
+    days_until_expiry: int
+    priority: Literal['high', 'normal', 'low']
+
+class UserNotifications(TypedDict):
+    expiring: List[ItemNotification]
+    expired: List[ItemNotification]
+
+NotificationType = Literal['in_app', 'email', 'sms']
+NotificationPriority = Literal['high', 'normal', 'low']
+
 class NotificationService:
     """Service for handling expiry notifications."""
     
-    def __init__(self):
-        self._notification_days = None
+    def __init__(self) -> None:
+        self._notification_days: Optional[List[int]] = None
     
     @property
-    def notification_days(self):
+    def notification_days(self) -> List[int]:
         """Get notification days from config."""
         if self._notification_days is None:
-            self._notification_days = current_app.config['NOTIFICATION_DAYS']
+            config_days = current_app.config.get('NOTIFICATION_DAYS')
+            if config_days is None:
+                self._notification_days = []
+            else:
+                self._notification_days = list(config_days)  # Ensure it's a list
         return self._notification_days
     
     def check_expiry_dates(self) -> List[Notification]:
         """Check items for expiry and create notifications."""
-        notifications = []
+        notifications: List[Notification] = []
         today = datetime.utcnow()
         
         # Group notifications by user
-        user_notifications: Dict[int, Dict] = {}
+        user_notifications: Dict[int, UserNotifications] = {}
         
         # Get all items with expiry dates
         items = Item.query.filter(
@@ -59,7 +75,9 @@ class NotificationService:
         # Handle items approaching expiry
         for item in items:
             days_until_expiry = item.days_until_expiry
-            
+            if days_until_expiry is None:
+                continue
+                
             # Check if we need to send a notification
             if days_until_expiry in self.notification_days:
                 # Only create in-app notification if user has enabled them
@@ -92,7 +110,9 @@ class NotificationService:
                 all_items.sort(key=lambda x: {'high': 0, 'normal': 1, 'low': 2}[x['priority']])
                 
                 if all_items:  # Only send if there are items to notify about
-                    if EmailService.send_daily_notification_email(user, all_items):
+                    # Convert ItemNotification to Dict for EmailService
+                    items_dict = cast(List[Dict[str, Any]], all_items)
+                    if EmailService.send_daily_notification_email(user, items_dict):
                         self._mark_email_sent(user_id)
         
         return notifications
@@ -113,24 +133,26 @@ class NotificationService:
         hours_since_last = (datetime.utcnow() - last_notification.created_at).total_seconds() / 3600
         return hours_since_last >= 24
     
-    def _mark_email_sent(self, user_id: int):
+    def _mark_email_sent(self, user_id: int) -> None:
         """Mark that an email was sent to this user."""
-        notification = Notification(
-            message="Daily expiry alert email sent",
-            type='email',
-            status='sent',
-            user_id=user_id
-        )
+        notification = Notification()
+        notification.message = "Daily expiry alert email sent"
+        notification.type = 'email'
+        notification.status = 'sent'
+        notification.user_id = user_id
+        
         db.session.add(notification)
         db.session.commit()
     
     def _create_notification(self, item: Item) -> Optional[Notification]:
         """Create a notification for an item."""
         days_until_expiry = item.days_until_expiry
-        
+        if days_until_expiry is None:
+            return None
+            
         # Determine priority based on days until expiry
         if days_until_expiry == 1:
-            priority = 'high'
+            priority: NotificationPriority = 'high'
             message = f"Critical: Product {item.name} (ID: {item.id}) expires tomorrow!"
         elif days_until_expiry <= 3:
             priority = 'high'
@@ -154,14 +176,13 @@ class NotificationService:
         if existing:
             return None
         
-        notification = Notification(
-            message=message,
-            type='in_app',
-            priority=priority,
-            user_id=item.user_id,
-            item_id=item.id,
-            status='pending'
-        )
+        notification = Notification()
+        notification.message = message
+        notification.type = 'in_app'
+        notification.priority = priority
+        notification.user_id = item.user_id
+        notification.item_id = item.id
+        notification.status = 'pending'
         
         db.session.add(notification)
         db.session.commit()
@@ -188,13 +209,15 @@ class NotificationService:
             )
             
             if message.sid:
-                notification.mark_as_sent()
+                notification.status = 'sent'
+                db.session.commit()
                 return True
             return False
             
         except Exception as e:
             current_app.logger.error(f"Error sending SMS notification: {str(e)}")
-            notification.mark_as_failed()
+            notification.status = 'failed'
+            db.session.commit()
             return False
     
     def send_email_notification(self, notification: Notification) -> bool:
@@ -241,46 +264,43 @@ class NotificationService:
         user_id: int,
         item_id: int,
         message: str,
-        type: str,
-        priority: str = 'medium'
+        type: NotificationType,
+        priority: NotificationPriority = 'normal'
     ) -> Optional[Notification]:
         """Create a new notification.
         
         Args:
             user_id: ID of the user to notify
-            item_id: ID of the related item
-            message: Notification message
-            type: Type of notification (e.g., 'expiry', 'low_stock')
-            priority: Priority level ('low', 'medium', 'high')
+            item_id: ID of the item this notification is about
+            message: The notification message
+            type: Type of notification (in_app, email, or sms)
+            priority: Priority level of the notification
             
         Returns:
             The created notification or None if creation failed
         """
+        notification = Notification()
+        notification.user_id = user_id
+        notification.item_id = item_id
+        notification.message = message
+        notification.type = type
+        notification.priority = priority
+        notification.status = 'pending'
+        
         try:
-            notification = Notification(
-                user_id=user_id,
-                item_id=item_id,
-                message=message,
-                type=type,
-                priority=priority,
-                created_at=datetime.now()
-            )
             db.session.add(notification)
             db.session.commit()
             return notification
         except Exception as e:
+            current_app.logger.error(f"Error creating notification: {str(e)}")
             db.session.rollback()
             return None
-
+    
     def mark_as_read(self, notification_id: int) -> bool:
         """Mark a notification as read."""
-        try:
-            notification = Notification.query.get(notification_id)
-            if notification:
-                notification.is_read = True
-                db.session.commit()
-                return True
-            return False
-        except Exception:
-            db.session.rollback()
-            return False 
+        notification = Notification.query.get(notification_id)
+        if notification:
+            notification.status = 'read'
+            db.session.commit()
+            return True
+        return False 

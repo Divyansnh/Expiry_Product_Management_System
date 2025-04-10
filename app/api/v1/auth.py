@@ -7,35 +7,59 @@ from app.models.user import User
 from app.services.zoho_service import ZohoService
 from datetime import datetime
 from flask import current_app
+from app.services.email_service import EmailService
 
 @api_bp.route('/auth/register', methods=['POST'])
 def register():
     """Register a new user."""
-    data = request.get_json()
-    
-    if not data or not data.get('username') or not data.get('email') or not data.get('password'):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({'error': 'Username already exists'}), 409
-    
-    if User.query.filter_by(email=data['email']).first():
-        return jsonify({'error': 'Email already exists'}), 409
-    
     try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['email', 'username', 'password']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Check if user already exists
+        if User.query.filter_by(email=data['email']).first():
+            return jsonify({'error': 'Email already registered'}), 400
+        if User.query.filter_by(username=data['username']).first():
+            return jsonify({'error': 'Username already taken'}), 400
+            
+        # Create user without password first
         user = User(
-            username=data['username'],
-            email=data['email']
+            email=data['email'],
+            username=data['username']
         )
-        user.password = data['password']
-        user.save()
+        
+        # Set password using property to ensure proper hashing
+        try:
+            user.password = data['password']
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+            
+        # Save user to database
+        db.session.add(user)
+        db.session.commit()
+        
+        # Send verification email
+        email_service = EmailService()
+        if not email_service.send_verification_email(user=user):
+            current_app.logger.error(f"Failed to send verification email to {user.email}")
+            return jsonify({'error': 'Failed to send verification email'}), 500
+            
+        # Store email in session for verification
+        session['pending_verification_email'] = user.email
+        session.modified = True
         
         return jsonify({
-            'message': 'User registered successfully',
-            'user': user.to_dict()
+            'message': 'Registration successful! Please check your email for verification.',
+            'redirect_url': url_for('auth.verify_email')
         }), 201
         
     except Exception as e:
+        current_app.logger.error(f"Error during registration: {str(e)}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
@@ -92,7 +116,12 @@ def login():
 def zoho_login():
     """Initiate Zoho OAuth login."""
     try:
-        zoho_service = ZohoService()
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        zoho_service = ZohoService(user)
         auth_url = zoho_service.get_auth_url()
         return jsonify({'auth_url': auth_url})
     except Exception as e:
@@ -103,11 +132,16 @@ def zoho_login():
 def zoho_callback():
     """Handle Zoho OAuth callback."""
     try:
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
         code = request.args.get('code')
         if not code:
             return jsonify({'error': 'No code provided'}), 400
         
-        zoho_service = ZohoService()
+        zoho_service = ZohoService(user)
         success = zoho_service.handle_callback(code)
         if success:
             return jsonify({'message': 'Successfully connected to Zoho'})
@@ -121,7 +155,12 @@ def zoho_callback():
 def zoho_logout():
     """Logout from Zoho."""
     try:
-        zoho_service = ZohoService()
+        user_id = get_jwt_identity()
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        zoho_service = ZohoService(user)
         zoho_service.logout()
         return jsonify({'message': 'Successfully disconnected from Zoho'})
     except Exception as e:

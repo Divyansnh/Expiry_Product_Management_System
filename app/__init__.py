@@ -12,7 +12,6 @@ from app.core.middleware import log_request, handle_cors, validate_request
 from app.routes import main_bp, auth_bp
 from app.routes.reports import reports_bp
 from app.api.v1 import api_bp
-from app.tasks.cleanup import cleanup_expired_items, cleanup_unverified_accounts
 import os
 
 def create_app(config_name=None):

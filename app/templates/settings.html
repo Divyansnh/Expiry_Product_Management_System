@@ -22,7 +22,8 @@
                 </div>
             {% else %}
                 <!-- Zoho Developer Credentials Form -->
-                <form method="POST" action="{{ url_for('main.update_zoho_credentials') }}" class="mb-6">
+                <form method="POST" action="{{ url_for('main.settings') }}" class="mb-6">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-4">
                         <label for="zoho_client_id" class="block text-sm font-medium text-gray-700">Zoho Client ID</label>
                         <input type="text" name="zoho_client_id" id="zoho_client_id" 

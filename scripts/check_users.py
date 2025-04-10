@@ -1,32 +1,27 @@
-import logging
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app import create_app
 from app.models.user import User
 from app.core.extensions import db
-from sqlalchemy import text
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = create_app()
 
-try:
-    app = create_app()
-    
-    with app.app_context():
-        # Test database connection
-        logger.info("Testing database connection...")
-        db.session.execute(text("SELECT 1"))
-        logger.info("Database connection successful!")
-        
-        # Count users
-        total_users = User.query.count()
-        print(f"\nTotal registered users: {total_users}")
-        
-        # Get details of each user
+with app.app_context():
+    try:
+        # Get all users
         users = User.query.all()
-        print("\nUser Details:")
+        
+        print(f"\nTotal users in database: {len(users)}")
+        print("\nUser details:")
         for user in users:
-            print(f"- Username: {user.username}, Email: {user.email}, Created: {user.created_at}")
+            print(f"Username: {user.username}")
+            print(f"Email: {user.email}")
+            print(f"Verified: {user.is_verified}")
+            print(f"Created at: {user.created_at}")
+            print("-" * 50)
             
-except Exception as e:
-    logger.error(f"Error occurred: {str(e)}", exc_info=True)
-    print(f"Error: {str(e)}") 
+    except Exception as e:
+        print(f"Error querying database: {str(e)}")
+        db.session.rollback() 

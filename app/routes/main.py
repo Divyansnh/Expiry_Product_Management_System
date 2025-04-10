@@ -75,12 +75,13 @@ def inventory():
                     Item.zoho_item_id.isnot(None)
                 ).all()
                 
-                # Check status in Zoho for each item
+                # Check status in Zoho for each item but don't delete immediately
                 for item in items_with_zoho:
                     zoho_status = zoho_service.get_item_status(item.zoho_item_id)
-                    if zoho_status == 'inactive':
-                        current_app.logger.info(f"Deleting item {item.id} ({item.name}) as it is inactive in Zoho")
-                        db.session.delete(item)
+                    if zoho_status == 'inactive' and item.status != STATUS_PENDING:
+                        current_app.logger.info(f"Item {item.id} ({item.name}) is inactive in Zoho")
+                        item.status = STATUS_PENDING
+                        db.session.add(item)
                 
                 db.session.commit()
                 
@@ -91,7 +92,7 @@ def inventory():
         else:
             flash('Zoho sync is not available. Please connect in Settings to sync your inventory.', 'info')
         
-        # Get user's items after potential deletions
+        # Get user's items after potential updates
         items = Item.query.filter_by(user_id=current_user.id).all()
         current_app.logger.info(f"Found {len(items)} items for user {current_user.id}")
         
@@ -626,34 +627,20 @@ def bulk_delete_items():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@main_bp.route('/save-zoho-credentials', methods=['POST'])
-def save_zoho_credentials():
-    if not current_user.is_authenticated:
-        flash('Please log in to connect your Zoho account', 'warning')
-        return redirect(url_for('auth.login'))
-        
-    form = ZohoCredentialsForm()
-    if form.validate_on_submit():
-        try:
-            # Store the credentials in the session temporarily
-            session['zoho_credentials'] = {
-                'client_id': form.client_id.data,
-                'client_secret': form.client_secret.data,
-                'organization_id': form.organization_id.data
-            }
-            
-            # Generate state parameter for security
-            state = secrets.token_urlsafe(16)
-            session['oauth_state'] = state
-            
-            # Redirect to Zoho authorization URL
-            auth_url = zoho_service.get_authorization_url(state)
-            return redirect(auth_url)
-            
-        except Exception as e:
-            current_app.logger.error(f"Error preparing Zoho authorization: {str(e)}")
-            flash('An error occurred while preparing Zoho authorization', 'error')
-            return redirect(url_for('main.settings'))
-            
-    flash('Invalid form submission', 'error')
-    return redirect(url_for('main.settings')) 
+@main_bp.route('/sync-inventory', methods=['GET', 'POST'])
+@login_required
+def sync_inventory():
+    """Sync inventory with Zoho."""
+    user = current_user
+    if not user.zoho_credentials:
+        flash('Please configure Zoho credentials first.', 'error')
+        return redirect(url_for('main.zoho_settings'))
+    
+    try:
+        zoho_service = ZohoService(user.zoho_credentials)
+        result = zoho_service.sync_inventory()
+        flash(f'Successfully synced {result["synced"]} items with Zoho.', 'success')
+    except Exception as e:
+        flash(f'Error syncing with Zoho: {str(e)}', 'error')
+    
+    return redirect(url_for('main.index')) 

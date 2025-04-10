@@ -3,7 +3,7 @@ import time
 import json
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union, Literal
 from flask import current_app, session, request
 from flask_login import current_user
 from app.core.extensions import db
@@ -14,14 +14,14 @@ from urllib.parse import urlencode
 class ZohoService:
     """Service for interacting with Zoho Inventory API."""
     
-    def __init__(self, user: User):
+    def __init__(self, user: User) -> None:
         """Initialize service with user."""
-        self.user = user
-        self.client_id = user.zoho_client_id or current_app.config['ZOHO_CLIENT_ID']
-        self.client_secret = user.zoho_client_secret or current_app.config['ZOHO_CLIENT_SECRET']
-        self.redirect_uri = current_app.config['ZOHO_REDIRECT_URI']
-        self.base_url = current_app.config['ZOHO_API_BASE_URL']
-        self.accounts_url = current_app.config['ZOHO_ACCOUNTS_URL']
+        self.user: User = user
+        self.client_id: str = user.zoho_client_id or current_app.config['ZOHO_CLIENT_ID']
+        self.client_secret: str = user.zoho_client_secret or current_app.config['ZOHO_CLIENT_SECRET']
+        self.redirect_uri: str = current_app.config['ZOHO_REDIRECT_URI']
+        self.base_url: str = current_app.config['ZOHO_API_BASE_URL']
+        self.accounts_url: str = current_app.config['ZOHO_ACCOUNTS_URL']
     
     def get_access_token(self) -> Optional[str]:
         """Get the current access token from user record."""
@@ -132,7 +132,7 @@ class ZohoService:
             current_app.logger.error(f"Unexpected error: {str(e)}")
             return None
     
-    def sync_inventory(self, user: User) -> bool:
+    def sync_inventory(self, user: User) -> Dict[str, Union[int, bool]]:
         """Sync inventory with Zoho."""
         try:
             current_app.logger.info("Fetching inventory data from Zoho")
@@ -141,7 +141,7 @@ class ZohoService:
             access_token = self.get_access_token()
             if not access_token:
                 current_app.logger.error("No access token available")
-                return False
+                return {"success": False, "synced": 0}
             
             # Fetch inventory data from Zoho
             response = requests.get(
@@ -157,17 +157,17 @@ class ZohoService:
             
             if response.status_code == 401:
                 current_app.logger.error("Unauthorized - token may be invalid")
-                return False
+                return {"success": False, "synced": 0}
             
             if response.status_code != 200:
                 current_app.logger.error(f"Failed to fetch inventory: {response.status_code} - {response.text}")
-                return False
+                return {"success": False, "synced": 0}
             
             try:
                 data = response.json()
                 if not isinstance(data, dict) or 'items' not in data:
                     current_app.logger.error(f"Invalid response format: {data}")
-                    return False
+                    return {"success": False, "synced": 0}
                     
                 items = data['items']
                 current_app.logger.info(f"Successfully fetched {len(items)} active items from Zoho")
@@ -175,6 +175,7 @@ class ZohoService:
                 # Get all local items for this user
                 local_items = {item.name.lower(): item for item in Item.query.filter_by(user_id=user.id).all()}
                 
+                synced_count = 0
                 for zoho_item in items:
                     item_name = zoho_item['name']
                     current_app.logger.info(f"Processing item: {item_name}")
@@ -222,19 +223,21 @@ class ZohoService:
                             user_id=user.id
                         )
                         db.session.add(item)
+                    
+                    synced_count += 1
                 
                 db.session.commit()
                 current_app.logger.info("Successfully synced inventory with Zoho")
-                return True
+                return {"success": True, "synced": synced_count}
                 
             except json.JSONDecodeError as e:
                 current_app.logger.error(f"Failed to parse inventory response: {response.text}")
-                return False
+                return {"success": False, "synced": 0}
             
         except Exception as e:
             current_app.logger.error(f"Error syncing inventory: {str(e)}")
             db.session.rollback()
-            return False
+            return {"success": False, "synced": 0}
     
     def get_auth_url(self) -> str:
         """Get the Zoho OAuth authorization URL."""
@@ -715,17 +718,16 @@ class ZohoService:
             current_app.logger.error(f"Error updating item status in Zoho: {str(e)}")
             return False
 
-    def _make_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Optional[Dict]:
+    def _make_request(self, method: str, endpoint: str, data: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Make a request to the Zoho API."""
         access_token = self.get_access_token()
         if not access_token:
-            current_app.logger.error("No access token available")
             return None
             
         try:
             response = requests.request(
                 method,
-                f"{self.base_url}/{endpoint}",
+                f"{self.base_url}{endpoint}",
                 headers={
                     'Authorization': f'Bearer {access_token}',
                     'Content-Type': 'application/json'
@@ -742,12 +744,8 @@ class ZohoService:
                 current_app.logger.error(f"Request failed: {response.status_code} - {response.text}")
                 return None
                 
-            try:
-                return response.json()
-            except json.JSONDecodeError:
-                current_app.logger.error(f"Failed to parse response: {response.text}")
-                return None
-                
-        except requests.exceptions.RequestException as e:
+            return response.json()
+            
+        except Exception as e:
             current_app.logger.error(f"Error making request: {str(e)}")
             return None 
