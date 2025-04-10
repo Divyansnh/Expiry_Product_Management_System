@@ -79,6 +79,31 @@ The application is configured through environment variables in the `.env` file. 
 - Custom logging
 - Session settings
 
+## 💾 Database Backups
+
+The application includes a backup system for the PostgreSQL database. Backups are stored in `scripts/db/backups/` and are not tracked in version control for security reasons.
+
+### Creating a Backup
+```bash
+python scripts/db/create_backup.py
+```
+
+### Restoring from Backup
+```bash
+psql -d expiry_tracker_v2 -f scripts/db/backups/your_backup_file.sql
+```
+
+### Backup Schedule
+- Backups are automatically created daily
+- Old backups are automatically cleaned up after 30 days
+- Backup files are named with the format: `expiry_tracker_v2_backup_YYYYMMDD_HHMMSS.sql`
+
+### Important Notes
+- Backups contain sensitive data and should be stored securely
+- Never commit backup files to version control
+- Regularly test backup restoration
+- Consider encrypting backup files for additional security
+
 ## 📦 Project Structure
 
 ```

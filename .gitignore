@@ -43,6 +43,8 @@ logs/
 # Database
 *.db
 *.sqlite3
+scripts/db/backups/
+*.sql
 
 # OS
 .DS_Store
