@@ -245,8 +245,6 @@ def update_notification_settings():
     """Update notification preferences."""
     try:
         current_user.email_notifications = request.form.get('email_notifications') == 'on'
-        current_user.sms_notifications = request.form.get('sms_notifications') == 'on'
-        current_user.in_app_notifications = request.form.get('in_app_notifications') == 'on'
         current_user.save()
         
         flash('Notification settings updated successfully', 'success')

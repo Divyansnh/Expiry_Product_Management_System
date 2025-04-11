@@ -3,20 +3,19 @@ from typing import List, Optional, Union, Dict, Any, Literal, TypedDict, Sequenc
 from flask import current_app
 from app.core.extensions import db
 from app.models.notification import Notification
-from app.models.item import Item
+from app.models.item import Item, STATUS_EXPIRED
 from app.models.user import User
 from app.services.email_service import EmailService
+from sqlalchemy import and_, not_, or_
+from sqlalchemy.sql import expression
+from sqlalchemy.sql.expression import BinaryExpression
 
 class ItemNotification(TypedDict):
     name: str
     days_until_expiry: int
     priority: Literal['high', 'normal', 'low']
 
-class UserNotifications(TypedDict):
-    expiring: List[ItemNotification]
-    expired: List[ItemNotification]
-
-NotificationType = Literal['in_app', 'email', 'sms']
+NotificationType = Literal['email']
 NotificationPriority = Literal['high', 'normal', 'low']
 
 class NotificationService:
@@ -24,6 +23,7 @@ class NotificationService:
     
     def __init__(self) -> None:
         self._notification_days: Optional[List[int]] = None
+        self.email_service = EmailService()
     
     @property
     def notification_days(self) -> List[int]:
@@ -36,228 +36,106 @@ class NotificationService:
                 self._notification_days = list(config_days)  # Ensure it's a list
         return self._notification_days
     
-    def check_expiry_dates(self) -> List[Notification]:
-        """Check items for expiry and create notifications."""
-        notifications: List[Notification] = []
-        today = datetime.utcnow()
-        
-        # Group notifications by user
-        user_notifications: Dict[int, UserNotifications] = {}
-        
-        # Get all items with expiry dates
-        items = Item.query.filter(
-            Item.expiry_date.isnot(None),
-            Item.expiry_date > today
-        ).all()
-        
-        # Get recently expired items (expired in last 24 hours)
-        recently_expired = Item.query.filter(
-            Item.expiry_date.isnot(None),
-            Item.expiry_date <= today,
-            Item.expiry_date >= today - timedelta(days=1)
-        ).all()
-        
-        # Handle recently expired items first
-        for item in recently_expired:
-            if item.user.email_notifications:
-                if item.user_id not in user_notifications:
-                    user_notifications[item.user_id] = {
-                        'expiring': [],
-                        'expired': []
-                    }
-                
-                user_notifications[item.user_id]['expired'].append({
-                    'name': item.name,
-                    'days_until_expiry': 0,
-                    'priority': 'high'
-                })
-        
-        # Handle items approaching expiry
-        for item in items:
-            days_until_expiry = item.days_until_expiry
-            if days_until_expiry is None:
-                continue
-                
-            # Check if we need to send a notification
-            if days_until_expiry in self.notification_days:
-                # Only create in-app notification if user has enabled them
-                if item.user.in_app_notifications:
-                    notification = self._create_notification(item)
-                    if notification:
-                        notifications.append(notification)
+    def check_expiry_dates(self) -> None:
+        """Check all items for expiry dates and send email notifications."""
+        try:
+            # Get all items with expiry dates that are not already expired
+            items = Item.query.filter(
+                and_(
+                    cast(BinaryExpression, Item.expiry_date.isnot(None)),
+                    cast(BinaryExpression, Item.status != STATUS_EXPIRED)
+                )
+            ).all()
+            
+            # Group items by user
+            user_items: Dict[int, List[Dict[str, Any]]] = {}
+            
+            for item in items:
+                days_until_expiry = item.days_until_expiry
+                if days_until_expiry is None:
+                    continue
                     
-                # Group notification by user for email
-                if item.user.email_notifications:
-                    if item.user_id not in user_notifications:
-                        user_notifications[item.user_id] = {
-                            'expiring': [],
-                            'expired': []
-                        }
+                # Only process items that are expiring soon or expired
+                # Match the inventory status logic: items with days_until_expiry = 0 are "expiring soon"
+                if days_until_expiry in [0, 1, 3, 7, 15, 30] or days_until_expiry < 0:
+                    if item.user_id not in user_items:
+                        user_items[item.user_id] = []
                     
-                    user_notifications[item.user_id]['expiring'].append({
+                    # Set priority based on days until expiry
+                    if days_until_expiry <= 3:
+                        priority = 'high'
+                    elif days_until_expiry <= 7:
+                        priority = 'normal'
+                    else:
+                        priority = 'low'
+                    
+                    user_items[item.user_id].append({
+                        'id': item.id,
                         'name': item.name,
                         'days_until_expiry': days_until_expiry,
-                        'priority': notification.priority if notification else 'normal'
+                        'expiry_date': item.expiry_date,
+                        'priority': priority
                     })
-        
-        # Send batched email notifications
-        for user_id, data in user_notifications.items():
-            user = User.query.get(user_id)
-            if user and self._should_send_email(user_id):
-                # Combine expiring and expired items
-                all_items = data['expired'] + data['expiring']
-                # Sort items by priority (high -> normal -> low)
-                all_items.sort(key=lambda x: {'high': 0, 'normal': 1, 'low': 2}[x['priority']])
-                
-                if all_items:  # Only send if there are items to notify about
-                    # Convert ItemNotification to Dict for EmailService
-                    items_dict = cast(List[Dict[str, Any]], all_items)
-                    if EmailService.send_daily_notification_email(user, items_dict):
-                        self._mark_email_sent(user_id)
-        
-        return notifications
-    
-    def _should_send_email(self, user_id: int) -> bool:
-        """Check if we should send an email to this user."""
-        # Get the last email notification for this user
-        last_notification = Notification.query.filter_by(
-            user_id=user_id,
-            type='email',
-            status='sent'
-        ).order_by(Notification.created_at.desc()).first()
-        
-        if not last_notification:
-            return True
             
-        # Check if 24 hours have passed since the last email
-        hours_since_last = (datetime.utcnow() - last_notification.created_at).total_seconds() / 3600
-        return hours_since_last >= 24
-    
-    def _mark_email_sent(self, user_id: int) -> None:
-        """Mark that an email was sent to this user."""
-        notification = Notification()
-        notification.message = "Daily expiry alert email sent"
-        notification.type = 'email'
-        notification.status = 'sent'
-        notification.user_id = user_id
-        
-        db.session.add(notification)
-        db.session.commit()
-    
-    def _create_notification(self, item: Item) -> Optional[Notification]:
-        """Create a notification for an item."""
-        days_until_expiry = item.days_until_expiry
-        if days_until_expiry is None:
-            return None
-            
-        # Determine priority based on days until expiry
-        if days_until_expiry == 1:
-            priority: NotificationPriority = 'high'
-            message = f"Critical: Product {item.name} (ID: {item.id}) expires tomorrow!"
-        elif days_until_expiry <= 3:
-            priority = 'high'
-            message = f"Warning: Product {item.name} (ID: {item.id}) expires in {days_until_expiry} days!"
-        elif days_until_expiry <= 7:
-            priority = 'normal'
-            message = f"Notice: Product {item.name} (ID: {item.id}) expires in {days_until_expiry} days."
-        else:
-            priority = 'low'
-            message = f"Info: Product {item.name} (ID: {item.id}) expires in {days_until_expiry} days."
-        
-        # Check if a similar notification already exists for today
-        today = datetime.utcnow().date()
-        existing = Notification.query.filter(
-            Notification.item_id == item.id,
-            Notification.type == 'in_app',
-            Notification.status == 'pending',
-            db.func.date(Notification.created_at) == today
-        ).first()
-        
-        if existing:
-            return None
-        
-        notification = Notification()
-        notification.message = message
-        notification.type = 'in_app'
-        notification.priority = priority
-        notification.user_id = item.user_id
-        notification.item_id = item.id
-        notification.status = 'pending'
-        
-        db.session.add(notification)
-        db.session.commit()
-        
-        return notification
-    
-    def send_sms_notification(self, notification: Notification) -> bool:
-        """Send SMS notification using Twilio."""
-        if not current_app.config['TWILIO_ACCOUNT_SID']:
-            return False
-            
-        try:
-            from twilio.rest import Client
-            
-            client = Client(
-                current_app.config['TWILIO_ACCOUNT_SID'],
-                current_app.config['TWILIO_AUTH_TOKEN']
-            )
-            
-            message = client.messages.create(
-                body=notification.message,
-                from_=current_app.config['TWILIO_PHONE_NUMBER'],
-                to=notification.user.phone_number  # You'll need to add this to User model
-            )
-            
-            if message.sid:
-                notification.status = 'sent'
-                db.session.commit()
-                return True
-            return False
+            # Send email notifications to each user
+            for user_id, items in user_items.items():
+                user = User.query.get(user_id)
+                if user and user.email_notifications and user.email:
+                    self.send_daily_notification_email(user, items)
             
         except Exception as e:
-            current_app.logger.error(f"Error sending SMS notification: {str(e)}")
-            notification.status = 'failed'
-            db.session.commit()
-            return False
+            current_app.logger.error(f"Error checking expiry dates: {str(e)}")
+            raise
     
-    def send_email_notification(self, notification: Notification) -> bool:
-        """Send email notification."""
-        # TODO: Implement email sending functionality
-        # This would use Flask-Mail or similar
-        return False
-    
-    def get_user_notifications(self, user_id: int, limit: Optional[int] = None) -> List[Notification]:
-        """Get notifications for a user.
+    def send_daily_notification_email(self, user: User, items: List[Dict[str, Any]]) -> bool:
+        """Send a daily notification email to a user about their items.
         
         Args:
-            user_id: ID of the user
-            limit: Optional limit on number of notifications to return
+            user: The user to send the notification to
+            items: List of items to notify about
             
         Returns:
-            List of notifications, optionally limited in number
+            True if email was sent successfully, False otherwise
         """
-        # Get user preferences
-        user = User.query.get(user_id)
-        if not user or not user.in_app_notifications:
-            return []
+        try:
+            if not items:
+                current_app.logger.info("No items to notify about")
+                return False
+                
+            # Sort items by days until expiry
+            items.sort(key=lambda x: x['days_until_expiry'])
             
-        query = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc())
-        if limit is not None:
-            query = query.limit(limit)
-        return query.all()
-    
-    def mark_notification_read(self, notification_id: int, user_id: int) -> bool:
-        """Mark a notification as read."""
-        notification = Notification.query.filter_by(
-            id=notification_id,
-            user_id=user_id
-        ).first()
-        
-        if notification:
-            notification.status = 'read'
-            db.session.commit()
-            return True
-        return False
+            # Prepare email content
+            subject = "Expiry Tracker - Daily Item Status Update"
+            template = 'daily_notification'
+            
+            # Send email
+            result = self.email_service.send_email(
+                subject=subject,
+                recipients=[str(user.email)],  # Ensure email is converted to string
+                template=template,
+                user=user,
+                items=items
+            )
+            
+            if result:
+                current_app.logger.info(f"Sent daily notification email to {user.email}")
+                # Create notification record
+                self.create_notification(
+                    user_id=user.id,
+                    item_id=items[0]['id'],  # Use first item's ID as reference
+                    message=f"Daily status update sent for {len(items)} items",
+                    type='email',
+                    priority='normal'
+                )
+            else:
+                current_app.logger.error(f"Failed to send daily notification email to {user.email}")
+            
+            return result
+            
+        except Exception as e:
+            current_app.logger.error(f"Error sending daily notification email to {user.email}: {str(e)}")
+            return False
     
     def create_notification(
         self,
@@ -267,13 +145,13 @@ class NotificationService:
         type: NotificationType,
         priority: NotificationPriority = 'normal'
     ) -> Optional[Notification]:
-        """Create a new notification.
+        """Create a new notification record.
         
         Args:
             user_id: ID of the user to notify
             item_id: ID of the item this notification is about
             message: The notification message
-            type: Type of notification (in_app, email, or sms)
+            type: Type of notification (email)
             priority: Priority level of the notification
             
         Returns:
@@ -285,7 +163,7 @@ class NotificationService:
         notification.message = message
         notification.type = type
         notification.priority = priority
-        notification.status = 'pending'
+        notification.status = 'sent'  # Mark as sent since we're creating after sending
         
         try:
             db.session.add(notification)
@@ -296,11 +174,27 @@ class NotificationService:
             db.session.rollback()
             return None
     
-    def mark_as_read(self, notification_id: int) -> bool:
-        """Mark a notification as read."""
-        notification = Notification.query.get(notification_id)
-        if notification:
-            notification.status = 'read'
-            db.session.commit()
-            return True
-        return False 
+    def get_user_notifications(self, user_id: int, limit: int = 10) -> List[Notification]:
+        """Get notifications for a specific user.
+        
+        Args:
+            user_id: The ID of the user to get notifications for
+            limit: Maximum number of notifications to return
+            
+        Returns:
+            List of Notification objects
+        """
+        try:
+            notifications = Notification.query.filter_by(
+                user_id=user_id,
+                status='pending'  # Only get pending notifications
+            ).filter(
+                Notification.type.in_(['email'])
+            ).order_by(
+                Notification.created_at.desc()
+            ).limit(limit).all()
+            
+            return notifications
+        except Exception as e:
+            current_app.logger.error(f"Error getting user notifications: {str(e)}")
+            return [] 

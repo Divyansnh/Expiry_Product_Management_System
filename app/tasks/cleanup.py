@@ -6,17 +6,23 @@ from app.models.user import User
 from app.services.zoho_service import ZohoService
 from app.services.notification_service import NotificationService
 from flask import current_app
+from sqlalchemy.sql import func
 
 def cleanup_expired_items():
     """Cleanup expired items and send notifications."""
     try:
         current_date = datetime.now().date()
-        yesterday = current_date - timedelta(days=1)
         
-        # Find items that expired yesterday using filter_by
-        expired_items = Item.query.filter_by(
-            expiry_date=yesterday,
-            status='Expired'
+        # First, update all item statuses to ensure consistency
+        items = Item.query.all()
+        for item in items:
+            item.update_status(force_update=True)
+        db.session.commit()
+        
+        # Find all expired items (case-insensitive)
+        expired_items = Item.query.filter(
+            Item.expiry_date < current_date,
+            func.lower(Item.status) == 'expired'
         ).all()
         
         notification_service = NotificationService()
@@ -27,7 +33,7 @@ def cleanup_expired_items():
                 user_id=item.user_id,
                 item_id=item.id,
                 message=f"Item '{item.name}' (ID: {item.id}) has expired and will be removed from the system.",
-                type='expiry',
+                type='email',
                 priority='high'
             )
             

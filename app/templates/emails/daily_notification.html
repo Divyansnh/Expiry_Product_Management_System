@@ -27,36 +27,69 @@
             border-radius: 5px;
             margin-bottom: 20px;
         }
-        .alert {
-            padding: 15px;
-            margin-bottom: 10px;
+        .section {
+            margin-bottom: 25px;
             border-radius: 5px;
-            border-left: 4px solid;
+            overflow: hidden;
         }
-        .high-priority {
+        .section-header {
+            padding: 10px 15px;
+            color: white;
+            font-weight: bold;
+            margin-bottom: 0;
+        }
+        .item-list {
+            margin: 0;
+            padding: 0;
+        }
+        .item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .item:last-child {
+            border-bottom: none;
+        }
+        .item-name {
+            font-weight: bold;
+        }
+        .item-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .urgent {
             background-color: #fff3f3;
-            border-left-color: #dc3545;
         }
-        .normal-priority {
+        .urgent .section-header {
+            background-color: #dc3545;
+        }
+        .urgent .item-status {
+            background-color: #dc3545;
+            color: white;
+        }
+        .warning {
             background-color: #fff9e6;
-            border-left-color: #ffc107;
         }
-        .low-priority {
+        .warning .section-header {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .warning .item-status {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .info {
             background-color: #f8f9fa;
-            border-left-color: #6c757d;
         }
-        .expired-section {
-            margin-bottom: 20px;
+        .info .section-header {
+            background-color: #6c757d;
         }
-        .expired-header {
-            color: #dc3545;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        .expiring-header {
-            color: #28a745;
-            font-weight: bold;
-            margin-bottom: 10px;
+        .info .item-status {
+            background-color: #6c757d;
+            color: white;
         }
         .footer {
             text-align: center;
@@ -75,38 +108,68 @@
         </div>
 
         <div class="summary">
-            <h3>Summary</h3>
+            <h3>Quick Summary</h3>
             <p>You have {{ items|length }} items that need attention:</p>
             <ul>
-                <li>Expired Items: {{ items|selectattr('days_until_expiry', 'equalto', 0)|list|length }}</li>
-                <li>High Priority: {{ items|selectattr('priority', 'equalto', 'high')|list|length }}</li>
-                <li>Normal Priority: {{ items|selectattr('priority', 'equalto', 'normal')|list|length }}</li>
-                <li>Low Priority: {{ items|selectattr('priority', 'equalto', 'low')|list|length }}</li>
+                <li>High Priority (Expiring today/tomorrow): {{ items|selectattr('priority', 'equalto', 'high')|list|length }}</li>
+                <li>Normal Priority (Expiring in 2-7 days): {{ items|selectattr('priority', 'equalto', 'normal')|list|length }}</li>
+                <li>Low Priority (Expiring in 8+ days): {{ items|selectattr('priority', 'equalto', 'low')|list|length }}</li>
             </ul>
         </div>
 
-        {% if items|selectattr('days_until_expiry', 'equalto', 0)|list %}
-        <div class="expired-section">
-            <div class="expired-header">⚠️ Expired Items</div>
-            {% for item in items if item.days_until_expiry == 0 %}
-            <div class="alert high-priority">
-                <strong>{{ item.name }}</strong><br>
-                This item has expired today!
+        {% if items %}
+            {% set urgent_items = items|selectattr('priority', 'equalto', 'high')|list %}
+            {% if urgent_items %}
+            <div class="section urgent">
+                <h3 class="section-header">⚠️ Urgent Attention Needed</h3>
+                <ul class="item-list">
+                    {% for item in urgent_items %}
+                    <li class="item">
+                        <span class="item-name">{{ item.name }}</span>
+                        <span class="item-status">
+                            {% if item.days_until_expiry == 0 %}
+                                Expires today!
+                            {% elif item.days_until_expiry == 1 %}
+                                Expires tomorrow
+                            {% else %}
+                                Expires in {{ item.days_until_expiry }} days
+                            {% endif %}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
-            {% endfor %}
-        </div>
-        {% endif %}
+            {% endif %}
 
-        {% if items|selectattr('days_until_expiry', 'greaterthan', 0)|list %}
-        <div class="expiring-section">
-            <div class="expiring-header">📅 Items Approaching Expiry</div>
-            {% for item in items if item.days_until_expiry > 0 %}
-            <div class="alert {{ item.priority }}-priority">
-                <strong>{{ item.name }}</strong><br>
-                Expires in {{ item.days_until_expiry }} days
+            {% set warning_items = items|selectattr('priority', 'equalto', 'normal')|list %}
+            {% if warning_items %}
+            <div class="section warning">
+                <h3 class="section-header">⚠️ Expiring Soon</h3>
+                <ul class="item-list">
+                    {% for item in warning_items %}
+                    <li class="item">
+                        <span class="item-name">{{ item.name }}</span>
+                        <span class="item-status">Expires in {{ item.days_until_expiry }} days</span>
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
-            {% endfor %}
-        </div>
+            {% endif %}
+
+            {% set info_items = items|selectattr('priority', 'equalto', 'low')|list %}
+            {% if info_items %}
+            <div class="section info">
+                <h3 class="section-header">ℹ️ Future Expiries</h3>
+                <ul class="item-list">
+                    {% for item in info_items %}
+                    <li class="item">
+                        <span class="item-name">{{ item.name }}</span>
+                        <span class="item-status">Expires in {{ item.days_until_expiry }} days</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
         {% endif %}
 
         <div class="footer">

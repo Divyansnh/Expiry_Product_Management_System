@@ -5,7 +5,14 @@
 {% block content %}
 <div class="container mx-auto px-4 py-8">
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-3xl font-bold text-gray-900 mb-8">Notifications</h1>
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">Notifications</h1>
+            {% if notifications %}
+                <button id="mark-all-read" class="text-sm text-blue-600 hover:text-blue-500">
+                    Mark All as Read
+                </button>
+            {% endif %}
+        </div>
 
         {% if notifications %}
             <div class="space-y-4">
@@ -13,24 +20,20 @@
                     <div class="bg-white rounded-lg shadow p-6">
                         <div class="flex items-start">
                             <div class="flex-shrink-0">
-                                {% if notification.priority == 'high' %}
-                                    <span class="text-red-500 text-2xl">⚠️</span>
-                                {% elif notification.priority == 'normal' %}
-                                    <span class="text-yellow-500 text-2xl">🔔</span>
-                                {% else %}
-                                    <span class="text-blue-500 text-2xl">ℹ️</span>
-                                {% endif %}
+                                <span class="text-blue-500 text-2xl">📧</span>
                             </div>
                             <div class="ml-4 flex-1">
                                 <p class="text-sm text-gray-900">{{ notification.message }}</p>
                                 <p class="text-xs text-gray-500 mt-1">{{ notification.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Email Notification
+                                </p>
                             </div>
-                            {% if not notification.read %}
-                                <form method="POST" action="{{ url_for('main.mark_notification_read', notification_id=notification.id) }}" class="ml-4">
-                                    <button type="submit" class="text-sm text-blue-600 hover:text-blue-500">
-                                        Mark as Read
-                                    </button>
-                                </form>
+                            {% if notification.status == 'pending' %}
+                                <button class="mark-as-read ml-4 text-sm text-blue-600 hover:text-blue-500" 
+                                        data-notification-id="{{ notification.id }}">
+                                    Mark as Sent
+                                </button>
                             {% endif %}
                         </div>
                     </div>
@@ -38,9 +41,89 @@
             </div>
         {% else %}
             <div class="bg-white rounded-lg shadow p-6 text-center">
-                <p class="text-gray-500">No notifications to display.</p>
+                <p class="text-gray-500">No pending notifications to display.</p>
             </div>
         {% endif %}
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get CSRF token from meta tag
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    
+    // Mark single notification as sent
+    document.querySelectorAll('.mark-as-read').forEach(button => {
+        button.addEventListener('click', function() {
+            const notificationId = this.dataset.notificationId;
+            fetch(`/api/v1/notifications/${notificationId}/read`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.message) {
+                    const notificationDiv = this.closest('.bg-white');
+                    this.remove();
+                    location.reload(); // Refresh to update status
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to mark notification as sent. Please try again.');
+            });
+        });
+    });
+
+    // Mark all notifications as sent
+    document.getElementById('mark-all-read')?.addEventListener('click', function() {
+        fetch('/api/v1/notifications/read-all', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.message) {
+                // Update all notification statuses in the UI
+                document.querySelectorAll('.bg-white').forEach(notificationDiv => {
+                    const button = notificationDiv.querySelector('.mark-as-read');
+                    if (button) {
+                        button.remove();
+                    }
+                });
+                // Hide the mark all as read button
+                this.style.display = 'none';
+                // Show success message
+                alert('All notifications have been marked as read');
+                // Refresh the page after a short delay
+                setTimeout(() => {
+                    location.reload();
+                }, 1000);
+            } else {
+                throw new Error('Failed to mark notifications as read');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to mark all notifications as read. Please try again.');
+        });
+    });
+});
+</script>
 {% endblock %} 

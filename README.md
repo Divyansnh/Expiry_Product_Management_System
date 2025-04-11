@@ -1,182 +1,91 @@
-# Smart Inventory Manager - AI-Powered Expiry Tracking
+# Expiry Tracker
 
-A modern Flask-based web application for intelligent inventory management and expiry date tracking. The system integrates with Zoho for inventory management and provides advanced features like OCR-based expiry date extraction, real-time notifications, and comprehensive analytics.
-
-## 🌟 Key Features
-
-- **Smart Inventory Management**
-  - Real-time inventory tracking
-  - Automated expiry date monitoring
-  - Bulk operations support
-  - Category-based organization
-
-- **AI-Powered Features**
-  - OCR-based expiry date extraction from images
-  - Intelligent expiry predictions
-  - Automated categorization
-
-- **Integration Capabilities**
-  - Seamless Zoho integration
-  - Email notifications system
-  - SMS alerts via Twilio (optional)
-  - RESTful API support
-
-- **Security & Compliance**
-  - Secure user authentication
-  - Role-based access control
-  - Email verification
-  - Password reset functionality
-
-- **Analytics & Reporting**
-  - Real-time dashboard
-  - Customizable reports
-  - Expiry trend analysis
-  - Inventory insights
-
-## 🚀 Quick Start
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/Divyansnh/Expired_Product_Tracking_System.git
-cd Expired_Product_Tracking_System
-```
-
-2. **Set up the environment**
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-3. **Configure the application**
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-4. **Initialize the database**
-```bash
-flask db upgrade
-```
-
-5. **Run the application**
-```bash
-flask run
-```
-
-## 🔧 Configuration
-
-The application is configured through environment variables in the `.env` file. See `.env.example` for all available options.
-
-### Required Configuration
-- Database URL
-- Email settings
-- Zoho credentials
-- Secret key
-
-### Optional Configuration
-- Twilio settings for SMS
-- Custom logging
-- Session settings
-
-## 💾 Database Backups
-
-The application includes a backup system for the PostgreSQL database. Backups are stored in `scripts/db/backups/` and are not tracked in version control for security reasons.
-
-### Creating a Backup
-```bash
-python scripts/db/create_backup.py
-```
-
-### Restoring from Backup
-```bash
-psql -d expiry_tracker_v2 -f scripts/db/backups/your_backup_file.sql
-```
-
-### Backup Schedule
-- Backups are automatically created daily
-- Old backups are automatically cleaned up after 30 days
-- Backup files are named with the format: `expiry_tracker_v2_backup_YYYYMMDD_HHMMSS.sql`
-
-### Important Notes
-- Backups contain sensitive data and should be stored securely
-- Never commit backup files to version control
-- Regularly test backup restoration
-- Consider encrypting backup files for additional security
-
-## 📦 Project Structure
-
-```
-smart-inventory-manager/
-├── app/
-│   ├── models/          # Database models
-│   ├── routes/          # Application routes
-│   ├── templates/       # HTML templates
-│   ├── static/          # Static files
-│   ├── tasks/           # Background tasks
-│   └── utils/           # Utility functions
-├── migrations/          # Database migrations
-├── scripts/            # Utility scripts
-├── tests/              # Test suite
-└── docs/               # Documentation
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Flask Framework
-- Zoho API
-- Twilio API
-- All contributors and supporters
-
-## 📞 Support
-
-For support, please open an issue in the GitHub repository or contact the maintainers.
+A comprehensive inventory management system with expiry date tracking, OCR capabilities, and automated notifications.
 
 ## Features
 
-- User authentication and authorization
 - Inventory management with expiry date tracking
 - OCR-based expiry date extraction from images
-- Email and SMS notifications for expiring items
+- Email notifications for expiring items
+- In-app notifications
+- Daily status updates
 - Integration with Zoho for inventory sync
 - Analytics and reporting
-- Mobile-responsive design
-- Scheduled tasks and background jobs
-- Email notifications system
+- User authentication and authorization
+- Responsive web interface
+
+## Tech Stack
+
+- **Backend**: Python, Flask
+- **Frontend**: HTML, CSS, JavaScript, Tailwind CSS
+- **Database**: PostgreSQL
+- **OCR**: Azure Computer Vision
+- **Email**: SMTP (Gmail)
+- **Authentication**: Flask-Login
+- **API**: RESTful
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- PostgreSQL database
-- Zoho account for inventory integration
-- Twilio account for SMS notifications (optional)
+- Python 3.8+
+- PostgreSQL
+- Azure Computer Vision account
+- Gmail account for email notifications
+- Zoho account for inventory integration (optional)
 
-## Configuration
+## Installation
 
-The application can be configured through environment variables in the `.env` file:
+1. Clone the repository:
+```bash
+git clone [repository-url]
+cd expiry-tracker
+```
 
-- `FLASK_APP`: Application entry point
-- `FLASK_ENV`: Environment (development/production)
-- `DATABASE_URL`: PostgreSQL database URL
-- `SECRET_KEY`: Application secret key
-- `ZOHO_CLIENT_ID`: Zoho OAuth client ID
-- `ZOHO_CLIENT_SECRET`: Zoho OAuth client secret
-- `ZOHO_REDIRECT_URI`: Zoho OAuth redirect URI
-- `TWILIO_ACCOUNT_SID`: Twilio account SID (optional)
-- `TWILIO_AUTH_TOKEN`: Twilio auth token (optional)
-- `TWILIO_PHONE_NUMBER`: Twilio phone number (optional)
+2. Create and activate virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Set up environment variables:
+```bash
+cp .env.example .env
+```
+Edit `.env` with your configuration:
+```env
+# Flask Configuration
+FLASK_APP=app
+FLASK_ENV=development
+SECRET_KEY=your-secret-key
+
+# Database Configuration
+DATABASE_URL=postgresql://username:password@localhost:5432/expiry_tracker
+
+# Azure Computer Vision
+AZURE_CV_KEY=your-azure-key
+AZURE_CV_ENDPOINT=your-azure-endpoint
+
+# Email Configuration
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=True
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-app-password
+
+# Zoho Configuration (Optional)
+ZOHO_CLIENT_ID=your-client-id
+ZOHO_CLIENT_SECRET=your-client-secret
+ZOHO_REDIRECT_URI=your-redirect-uri
+```
+
+5. Initialize the database:
+```bash
+flask db upgrade
+```
 
 ## Usage
 
@@ -187,74 +96,26 @@ flask run
 
 2. Access the application at `http://localhost:5000`
 
-3. Register a new account or log in with existing credentials
+3. Create an account and start managing your inventory
 
-4. Connect your Zoho account for inventory sync
-
-5. Start managing your inventory and tracking expiry dates
-
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
-project/
+expiry-tracker/
 ├── app/
-│   ├── __init__.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── user.py
-│   │   ├── product.py
-│   │   └── notification.py
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── products.py
-│   │   └── notifications.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── ocr_service.py
-│   │   ├── zoho_service.py
-│   │   └── notification_service.py
-│   ├── static/
-│   │   ├── css/
-│   │   ├── js/
-│   │   └── images/
-│   └── templates/
-│       ├── base.html
-│       ├── auth/
-│       └── products/
-├── config.py
-├── requirements.txt
-├── .env
-├── .gitignore
-└── README.md
-```
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Code Style
-
-The project follows PEP 8 guidelines. Format code using:
-
-```bash
-black .
-```
-
-### Database Migrations
-
-Create a new migration:
-```bash
-flask db migrate -m "description"
-```
-
-Apply migrations:
-```bash
-flask db upgrade
+│   ├── models/          # Database models
+│   ├── routes/          # Route handlers
+│   ├── services/        # Business logic
+│   ├── templates/       # HTML templates
+│   ├── static/          # Static files
+│   └── core/            # Core functionality
+├── scripts/             # Utility scripts
+├── tests/               # Test files
+├── migrations/          # Database migrations
+├── .env                 # Environment variables
+├── .gitignore          # Git ignore file
+├── requirements.txt     # Python dependencies
+└── README.md           # This file
 ```
 
 ## Contributing
@@ -269,38 +130,9 @@ flask db upgrade
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Testing
+## Acknowledgments
 
-The application uses pytest for testing. To run the tests:
-
-```bash
-# Install test dependencies
-pip install -r requirements.txt
-
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_email_service.py
-
-# Run tests with coverage report
-pytest --cov=app tests/
-```
-
-## Utility Scripts
-
-The `scripts` directory contains utility scripts for various tasks:
-
-### Check Users
-To view information about registered users:
-```bash
-python scripts/check_users.py
-```
-
-### Test Email
-To test the email notification system:
-```bash
-python scripts/test_email.py
-```
-
-Note: Make sure your email configuration is properly set up in the `.env` file before running email-related scripts. 
+- Flask Framework
+- Azure Computer Vision
+- Zoho API
+- All contributors and supporters 

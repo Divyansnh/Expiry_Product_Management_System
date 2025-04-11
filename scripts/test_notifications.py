@@ -9,102 +9,67 @@ from app.models.item import Item
 from app.models.notification import Notification
 from app.services.notification_service import NotificationService
 from app.core.extensions import db
+from app.core.config import Config
+import logging
 
-def test_notification_generation():
-    """Test notification generation for different expiry scenarios."""
-    app = create_app()
-    app.config['NOTIFICATION_DAYS'] = [30, 15, 7, 3, 1]  # Set notification days
+class TestConfig(Config):
+    """Test configuration."""
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    WTF_CSRF_ENABLED = False
+    NOTIFICATION_DAYS = [30, 15, 7, 3, 1]
+
+def test_notifications():
+    """Test the notification system."""
+    # Create app with testing config
+    app = create_app('testing')
     
     with app.app_context():
-        # Get or create a test user
-        user = User.query.filter_by(email='test@example.com').first()
-        if not user:
-            user = User(
-                username='testuser',
-                email='test@example.com'
-            )
-            user.password = 'Test123!'  # This will set the password_hash
-            user.in_app_notifications = True
-            user.email_notifications = False
-            user.sms_notifications = False
-            user.save()
-        
-        print("\n=== Test User ===")
-        print(f"Username: {user.username}")
-        print(f"In-app notifications: {user.in_app_notifications}")
-        print(f"Email notifications: {user.email_notifications}")
-        print(f"SMS notifications: {user.sms_notifications}")
-        
-        # Clear existing test items and notifications
-        Item.query.filter_by(user_id=user.id).delete()
-        Notification.query.filter_by(user_id=user.id).delete()
+        # Create test user
+        test_user = User(
+            username='test_user',
+            email='test@example.com'
+        )
+        test_user.password = 'Test123!'  # Use password property setter
+        test_user.email_notifications = True
+        db.session.add(test_user)
         db.session.commit()
         
         # Create test items with different expiry dates
-        today = datetime.now().date()
+        today = datetime.utcnow().date()
         test_items = [
-            # Item expiring in 30 days
-            {'name': 'Test Item 30 Days', 'expiry_date': today + timedelta(days=30)},
-            # Item expiring in 15 days
-            {'name': 'Test Item 15 Days', 'expiry_date': today + timedelta(days=15)},
-            # Item expiring in 7 days
-            {'name': 'Test Item 7 Days', 'expiry_date': today + timedelta(days=7)},
-            # Item expiring in 3 days
-            {'name': 'Test Item 3 Days', 'expiry_date': today + timedelta(days=3)},
-            # Item expiring in 1 day
-            {'name': 'Test Item 1 Day', 'expiry_date': today + timedelta(days=1)},
-            # Item expiring in 4 days (should not generate notification)
-            {'name': 'Test Item 4 Days', 'expiry_date': today + timedelta(days=4)},
+            ('Item 1', today + timedelta(days=1)),  # Expires in 1 day
+            ('Item 2', today + timedelta(days=3)),  # Expires in 3 days
+            ('Item 3', today + timedelta(days=7)),  # Expires in 7 days
+            ('Item 4', today + timedelta(days=15)),  # Expires in 15 days
+            ('Item 5', today + timedelta(days=30)),  # Expires in 30 days
+            ('Item 6', today - timedelta(days=1)),  # Already expired
         ]
         
-        print("\n=== Creating Test Items ===")
-        for item_data in test_items:
+        for name, expiry_date in test_items:
             item = Item(
-                name=item_data['name'],
-                expiry_date=item_data['expiry_date'],
-                user_id=user.id,
-                quantity=10
+                name=name,
+                expiry_date=expiry_date,
+                user_id=test_user.id
             )
-            item.save()
-            print(f"Created: {item.name} (Expires in {item.days_until_expiry} days)")
+            db.session.add(item)
+        
+        db.session.commit()
         
         # Run notification check
-        print("\n=== Running Notification Check ===")
         notification_service = NotificationService()
-        notifications = notification_service.check_expiry_dates()
+        notification_service.check_expiry_dates()
         
-        # Print results
-        print("\n=== Notification Test Results ===")
-        print(f"Total notifications generated: {len(notifications)}")
-        print("\nGenerated Notifications:")
+        # Print created notifications
+        notifications = Notification.query.filter_by(user_id=test_user.id).all()
+        print("\nCreated Notifications:")
         for notification in notifications:
-            print(f"- {notification.message} (Priority: {notification.priority}, Status: {notification.status})")
+            print(f"- {notification.message} (Type: {notification.type}, Priority: {notification.priority})")
         
-        # Verify no duplicates
-        print("\n=== Duplicate Check ===")
-        notification_service.check_expiry_dates()  # Run again to check for duplicates
-        new_notifications = Notification.query.filter_by(user_id=user.id).all()
-        print(f"Total notifications after second run: {len(new_notifications)}")
-        if len(new_notifications) == len(notifications):
-            print("✅ No duplicate notifications created")
-        else:
-            print("❌ Duplicate notifications detected!")
-        
-        # Test notification preferences
-        print("\n=== Testing Notification Preferences ===")
-        user.in_app_notifications = False
-        user.save()
-        print("Disabled in-app notifications")
-        
-        notifications = notification_service.get_user_notifications(user.id)
-        print(f"Notifications with in-app disabled: {len(notifications)}")
-        
-        user.in_app_notifications = True
-        user.save()
-        print("Re-enabled in-app notifications")
-        
-        notifications = notification_service.get_user_notifications(user.id)
-        print(f"Notifications with in-app enabled: {len(new_notifications)}")
+        # Clean up
+        db.session.delete(test_user)
+        db.session.commit()
 
 if __name__ == '__main__':
-    test_notification_generation() 
+    test_notifications() 

@@ -18,9 +18,9 @@ class User(UserMixin, BaseModel):
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(64), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256))
+    password_hash = db.Column(db.String(128))
     is_active = db.Column(db.Boolean, default=True)
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -38,9 +38,7 @@ class User(UserMixin, BaseModel):
     is_verified = db.Column(db.Boolean, default=False)
     
     # Notification preferences
-    email_notifications = db.Column(db.Boolean, default=False)
-    sms_notifications = db.Column(db.Boolean, default=False)
-    in_app_notifications = db.Column(db.Boolean, default=False)
+    email_notifications = db.Column(db.Boolean, default=True)
     
     # Relationships
     items = db.relationship('Item', back_populates='user', lazy='dynamic')
@@ -62,6 +60,8 @@ class User(UserMixin, BaseModel):
         self.username = username
         self.email = email
         self.is_verified = is_verified
+        # Set default notification preferences
+        self.email_notifications = True  # Enable email notifications by default
     
     @property
     def password(self):
@@ -184,9 +184,7 @@ class User(UserMixin, BaseModel):
             'is_active': self.is_active,
             'is_admin': self.is_admin,
             'is_verified': self.is_verified,
-            'email_notifications': self.email_notifications,
-            'sms_notifications': self.sms_notifications,
-            'in_app_notifications': self.in_app_notifications
+            'email_notifications': self.email_notifications
         })
         return data
     

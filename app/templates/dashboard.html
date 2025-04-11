@@ -51,17 +51,14 @@
                     {% for notification in notifications %}
                         <div class="flex items-start p-4 bg-gray-50 rounded-lg">
                             <div class="flex-shrink-0">
-                                {% if notification.priority == 'high' %}
-                                    <span class="text-red-500">⚠️</span>
-                                {% elif notification.priority == 'normal' %}
-                                    <span class="text-yellow-500">🔔</span>
-                                {% else %}
-                                    <span class="text-blue-500">ℹ️</span>
-                                {% endif %}
+                                <span class="text-blue-500">📧</span>
                             </div>
                             <div class="ml-3">
                                 <p class="text-sm text-gray-900">{{ notification.message }}</p>
                                 <p class="text-xs text-gray-500 mt-1">{{ notification.created_at }}</p>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Email Notification
+                                </p>
                             </div>
                         </div>
                     {% endfor %}
@@ -125,7 +122,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Group expiring items by category
     const categoryData = {};
     const categoryItems = {};
-    {{ expiring_items|tojson|safe }}.forEach(item => {
+    const expiringItemsData = JSON.parse('{{ expiring_items|tojson|safe }}');
+    expiringItemsData.forEach(item => {
         const category = item.category || 'Uncategorized';
         categoryData[category] = (categoryData[category] || 0) + 1;
         if (!categoryItems[category]) {
@@ -225,7 +223,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Prepare data for the chart
-    const expiringItems = {{ expiring_items|tojson|safe }};
+    const expiringItems = JSON.parse('{{ expiring_items|tojson|safe }}');
     const expiryData = next60Days.map(date => {
         const dateStr = date.toISOString().split('T')[0];
         const items = expiringItems.filter(item => {

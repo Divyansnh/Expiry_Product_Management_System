@@ -12,7 +12,6 @@ EmailTemplate = Literal[
     'verify_email',
     'reset_password',
     'daily_notification',
-    'expiry_notification',
     'password_reset_confirmation'
 ]
 
@@ -113,6 +112,11 @@ class EmailService:
             bool: True if email was sent successfully, False otherwise
         """
         try:
+            # Check if user has a valid email
+            if not user.email:
+                logger.error("User email is None")
+                return False
+                
             # Generate verification code
             user.generate_verification_code()
             
@@ -122,9 +126,12 @@ class EmailService:
             logger.info(f"Using TLS: {current_app.config['MAIL_USE_TLS']}")
             logger.info(f"Sender: {current_app.config['MAIL_DEFAULT_SENDER']}")
             
+            # Ensure email is a string
+            user_email: str = str(user.email)
+            
             return self.send_email(
                 subject="Verify Your Email",
-                recipients=[user.email],
+                recipients=[user_email],
                 template='verify_email',
                 user=user,
                 verification_code=user.verification_code
@@ -173,65 +180,79 @@ class EmailService:
             logger.info("No items to notify about")
             return False
             
-        # Filter out test items and items that don't need attention
-        items_needing_attention = [
-            item for item in items 
-            if not item['name'].lower().startswith('test') and 
-            item['days_until_expiry'] <= 7  # Only include items expiring within 7 days
-        ]
+        # Filter out test items and set priority
+        items_needing_attention = []
+        for item in items:
+            if not item['name'].lower().startswith('test'):
+                # Set priority based on days until expiry
+                if item['days_until_expiry'] <= 1:  # Today or tomorrow
+                    priority = 'high'
+                elif item['days_until_expiry'] <= 7:  # Within 7 days
+                    priority = 'normal'
+                else:  # More than 7 days
+                    priority = 'low'
+                
+                items_needing_attention.append({
+                    **item,
+                    'priority': priority
+                })
         
         if not items_needing_attention:
             logger.info("No items need attention at this time")
             return False
             
-        logger.info(f"Sending daily notification email to {user.email} with {len(items_needing_attention)} items needing attention")
-        return self.send_email(
-            subject='Daily Expiry Alert Summary',
-            recipients=[user.email],
-            template='daily_notification',
+        # Sort items by days until expiry
+        items_needing_attention.sort(key=lambda x: x['days_until_expiry'])
+        
+        # Prepare email content
+        subject = "Expiry Tracker - Daily Item Status Update"
+        template = 'daily_notification'
+        
+        # Ensure email is a string and not None
+        if not user.email:
+            logger.error("User email is None")
+            return False
+        user_email: str = str(user.email)
+        
+        # Send email
+        result = self.send_email(
+            subject=subject,
+            recipients=[user_email],
+            template=template,
             user=user,
             items=items_needing_attention
         )
+        
+        if result:
+            logger.info(f"Sent daily notification email to {user_email} with {len(items_needing_attention)} items")
+        
+        return result
     
-    def send_expiry_notification(self, user: User, item_name: str, days_until_expiry: int) -> bool:
-        """Send expiry notification email.
+    def send_password_reset_confirmation(self, user: Union[User, str]) -> bool:
+        """Send password reset confirmation email.
         
         Args:
-            user: User to send notification to
-            item_name: Name of the expiring item
-            days_until_expiry: Number of days until expiry
+            user: Either a User object or an email string to send confirmation to
             
         Returns:
             bool: True if email was sent successfully, False otherwise
         """
+        # Handle both User object and email string
+        if isinstance(user, User):
+            if not user.email:
+                logger.error("User email is None")
+                return False
+            user_email = str(user.email)
+            template_user = user
+        else:
+            user_email = str(user)
+            template_user = None
+        
+        logger.info(f"Sending password reset confirmation to {user_email}")
         return self.send_email(
-            subject=f'Expiry Alert: {item_name}',
-            recipients=[user.email],
-            template='expiry_notification',
-            user=user,
-            item_name=item_name,
-            days_until_expiry=days_until_expiry
-        )
-
-    def send_password_reset_confirmation(self, email: str) -> bool:
-        """Send confirmation email after password reset.
-        
-        Args:
-            email: Email address to send confirmation to
-            
-        Returns:
-            bool: True if email was sent successfully, False otherwise
-        """
-        try:
-            logger.info(f"Sending password reset confirmation email to {email}")
-            
-            return self.send_email(
-                subject='Password Reset Confirmation',
-                recipients=[email],
-                template='password_reset_confirmation',
-                email=email
-            )
-            
-        except Exception as e:
-            logger.error(f"Error sending password reset confirmation email: {str(e)}")
-            return False 
+            subject='Password Reset Confirmation',
+            recipients=[user_email],
+            template='password_reset_confirmation',
+            user=template_user,
+            email=user_email  # Pass email separately for template
+        ) 

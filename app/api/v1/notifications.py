@@ -1,43 +1,50 @@
 from flask import jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_login import login_required, current_user
 from app.api.v1 import api_bp
 from app.core.extensions import db
 from app.models.notification import Notification
 from app.models.user import User
 from app.services.notification_service import NotificationService
+from flask_wtf.csrf import generate_csrf
+from datetime import datetime, timedelta
+from app.models.item import Item
+from typing import cast
 
 @api_bp.route('/notifications', methods=['GET'])
-@jwt_required()
+@login_required
 def get_notifications():
     """Get user's notifications."""
-    user_id = get_jwt_identity()
     limit = request.args.get('limit', default=10, type=int)
     notification_service = NotificationService()
-    notifications = notification_service.get_user_notifications(user_id, limit)
+    notifications = notification_service.get_user_notifications(current_user.id, limit)
     return jsonify([notification.to_dict() for notification in notifications])
 
-@api_bp.route('/notifications/<int:notification_id>', methods=['PUT'])
-@jwt_required()
+@api_bp.route('/notifications/<int:notification_id>/read', methods=['PUT'])
+@login_required
 def mark_notification_read(notification_id):
     """Mark a notification as read."""
-    user_id = get_jwt_identity()
-    notification_service = NotificationService()
-    success = notification_service.mark_notification_read(notification_id, user_id)
+    notification = Notification.query.filter_by(
+        id=notification_id,
+        user_id=current_user.id
+    ).first()
     
-    if success:
-        return jsonify({'message': 'Notification marked as read'})
-    return jsonify({'error': 'Notification not found'}), 404
+    if not notification:
+        return jsonify({'error': 'Notification not found'}), 404
+        
+    notification.is_read = True
+    db.session.commit()
+    return jsonify({'message': 'Notification marked as read'})
 
 @api_bp.route('/notifications/read-all', methods=['PUT'])
-@jwt_required()
+@login_required
 def mark_all_notifications_read():
     """Mark all notifications as read."""
-    user_id = get_jwt_identity()
     try:
+        # Update all pending notifications to sent status
         Notification.query.filter_by(
-            user_id=user_id,
+            user_id=current_user.id,
             status='pending'
-        ).update({'status': 'read'})
+        ).update({'status': 'sent'})
         db.session.commit()
         return jsonify({'message': 'All notifications marked as read'})
     except Exception as e:
@@ -45,42 +52,27 @@ def mark_all_notifications_read():
         return jsonify({'error': str(e)}), 500
 
 @api_bp.route('/notifications/preferences', methods=['GET'])
-@jwt_required()
+@login_required
 def get_notification_preferences():
     """Get user's notification preferences."""
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
     return jsonify({
-        'email_notifications': user.email_notifications,
-        'sms_notifications': user.sms_notifications,
-        'in_app_notifications': user.in_app_notifications
+        'email_notifications': current_user.email_notifications
     })
 
 @api_bp.route('/notifications/preferences', methods=['PUT'])
-@jwt_required()
+@login_required
 def update_notification_preferences():
     """Update user's notification preferences."""
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
+    if not request.is_json:
+        return jsonify({'error': 'Missing JSON in request'}), 400
+        
     data = request.get_json()
     
     try:
         if 'email_notifications' in data:
-            user.email_notifications = data['email_notifications']
-        if 'sms_notifications' in data:
-            user.sms_notifications = data['sms_notifications']
-        if 'in_app_notifications' in data:
-            user.in_app_notifications = data['in_app_notifications']
+            current_user.email_notifications = data['email_notifications']
         
-        user.save()
+        current_user.save()
         return jsonify({'message': 'Notification preferences updated'})
         
     except Exception as e:
@@ -88,40 +80,58 @@ def update_notification_preferences():
         return jsonify({'error': str(e)}), 500
 
 @api_bp.route('/notifications/test', methods=['POST'])
-@jwt_required()
+@login_required
 def test_notifications():
     """Test notification delivery."""
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
+    if not request.is_json:
+        return jsonify({'error': 'Missing JSON in request'}), 400
+        
     data = request.get_json()
-    notification_type = data.get('type', 'in_app')
+    notification_type = data.get('type', 'email')  # Default to email if not specified
+    
+    if notification_type != 'email':
+        return jsonify({'error': 'Invalid notification type'}), 400
+        
     notification_service = NotificationService()
     
     try:
-        notification = Notification(
-            message='This is a test notification',
-            type=notification_type,
-            user_id=user_id,
-            item_id=None  # No specific item for test
+        # Create a test item for the notification
+        test_item = Item(
+            name='Test Item',
+            expiry_date=datetime.utcnow() + timedelta(days=1),
+            user_id=current_user.id
         )
-        db.session.add(notification)
+        db.session.add(test_item)
         db.session.commit()
         
-        # Send notification based on type
-        if notification_type == 'sms':
-            success = notification_service.send_sms_notification(notification)
-        elif notification_type == 'email':
-            success = notification_service.send_email_notification(notification)
-        else:
-            success = True  # In-app notifications are already created
+        # Create notification using the service
+        notification = notification_service.create_notification(
+            user_id=current_user.id,
+            item_id=test_item.id,
+            message='This is a test notification',
+            type=notification_type,
+            priority='normal'
+        )
         
-        if success:
-            return jsonify({'message': 'Test notification sent successfully'})
-        return jsonify({'error': 'Failed to send test notification'}), 500
+        if notification:
+            # Send notification based on type
+            if notification_type == 'email':
+                # Cast current_user to User type since we know it's a User when @login_required
+                user = cast(User, current_user)
+                success = notification_service.send_daily_notification_email(
+                    user,
+                    [{
+                        'id': test_item.id,
+                        'name': test_item.name,
+                        'days_until_expiry': 1,
+                        'expiry_date': test_item.expiry_date
+                    }]
+                )
+            
+            if success:
+                return jsonify({'message': 'Test notification sent successfully'})
+            return jsonify({'error': 'Failed to send test notification'}), 500
+        return jsonify({'error': 'Failed to create test notification'}), 500
         
     except Exception as e:
         db.session.rollback()

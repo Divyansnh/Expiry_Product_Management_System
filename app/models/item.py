@@ -91,7 +91,7 @@ class Item(BaseModel):
     def is_expired(self) -> bool:
         """Check if item is expired with caching."""
         days = self.days_until_expiry
-        return days is not None and days <= 0
+        return days is not None and days < 0
     
     @property
     def is_near_expiry(self) -> bool:
@@ -195,7 +195,7 @@ class Item(BaseModel):
             days_until_expiry = self.days_until_expiry
             current_app.logger.info(f"Item {self.id} ({self.name}) - Days until expiry: {days_until_expiry}")
             
-            if days_until_expiry is None or days_until_expiry <= 0:
+            if days_until_expiry is None or days_until_expiry < 0:
                 new_status = STATUS_EXPIRED
             elif days_until_expiry <= 7:
                 new_status = STATUS_EXPIRING_SOON
@@ -211,27 +211,6 @@ class Item(BaseModel):
                 f"Days until expiry: {days_until_expiry if self.expiry_date else 'None'}"
             )
             
-            # Create notification for status change
-            from app.services.notification_service import NotificationService
-            notification_service = NotificationService()
-            
-            if new_status == STATUS_EXPIRED:
-                notification_service.create_notification(
-                    user_id=self.user_id,
-                    item_id=self.id,
-                    message=f"Item '{self.name}' has expired",
-                    type='expiry',
-                    priority='high'
-                )
-            elif new_status == STATUS_EXPIRING_SOON:
-                notification_service.create_notification(
-                    user_id=self.user_id,
-                    item_id=self.id,
-                    message=f"Item '{self.name}' is expiring in {days_until_expiry} days",
-                    type='expiry',
-                    priority='medium'
-                )
-            
             # Update Zoho status if synced
             if self.zoho_item_id:
                 from app.services.zoho_service import ZohoService
@@ -242,7 +221,7 @@ class Item(BaseModel):
                     zoho_status = 'active' if new_status in [STATUS_ACTIVE, STATUS_EXPIRING_SOON] else 'inactive'
                     zoho_service.update_item_status_in_zoho(self.zoho_item_id, zoho_status)
             
-            db.session.commit() 
+            db.session.commit()
 
     @classmethod
     def find_existing_item(cls, name: str, user_id: int) -> Optional['Item']:

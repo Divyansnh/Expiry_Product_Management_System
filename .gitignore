@@ -24,69 +24,74 @@ wheels/
 venv/
 ENV/
 env/
+.env
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Logs
-logs/
-*.log
+.DS_Store
 
 # Database
-*.db
 *.sqlite3
-scripts/db/backups/
+*.db
 *.sql
+scripts/db/backups/
 
-# OS
+# Logs
+*.log
+logs/
+log/
+
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Flask
+instance/
+.webassets-cache
+flask_session/
+
+# Azure
+*.pem
+*.key
+*.cert
+
+# Email
+*.eml
+*.msg
+
+# OCR
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.pdf
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# System Files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
 # Project specific
-flask_session/
-uploads/
+app/static/uploads/
+app/static/images/processed/
 *.pyc
 *.pyo
 *.pyd
-.Python
-*.so
-*.dll
-*.dylib
-*.out
-*.app
-*.exe
-*.egg
-*.egg-info/
-*.log
-*.sqlite
-*.db
-*.sqlite3
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.dll
-*.dylib
-*.out
-*.app
-*.exe
-*.egg
-*.egg-info/
-*.log
-*.sqlite
-*.db
-*.sqlite3 
+.Python 
