@@ -31,8 +31,8 @@ def mark_notification_read(notification_id):
     if not notification:
         return jsonify({'error': 'Notification not found'}), 404
         
-    notification.is_read = True
-    db.session.commit()
+    # Use the mark_as_read method
+    notification.mark_as_read()
     return jsonify({'message': 'Notification marked as read'})
 
 @api_bp.route('/notifications/read-all', methods=['PUT'])

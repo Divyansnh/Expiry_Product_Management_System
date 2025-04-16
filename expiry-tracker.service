@@ -1,0 +1,14 @@
+[Unit]
+Description=Expiry Tracker Application
+After=network.target
+
+[Service]
+User=divyanshsingh
+WorkingDirectory=/Users/divyanshsingh/Desktop/project%20copy
+Environment="PATH=/Users/divyanshsingh/Desktop/project%20copy/venv/bin"
+ExecStart=/Users/divyanshsingh/Desktop/project%20copy/venv/bin/gunicorn --workers 3 --bind 0.0.0.0:5000 "app:create_app()"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 

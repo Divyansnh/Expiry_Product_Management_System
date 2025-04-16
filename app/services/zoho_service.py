@@ -22,6 +22,9 @@ class ZohoService:
         self.redirect_uri: str = current_app.config['ZOHO_REDIRECT_URI']
         self.base_url: str = current_app.config['ZOHO_API_BASE_URL']
         self.accounts_url: str = current_app.config['ZOHO_ACCOUNTS_URL']
+        
+        # Don't log sensitive information
+        current_app.logger.info("Zoho service initialized for user: %s", user.username)
     
     def get_access_token(self) -> Optional[str]:
         """Get the current access token from user record."""
@@ -250,11 +253,12 @@ class ZohoService:
             'prompt': 'consent'
         }
         
-        current_app.logger.info(f"Generating auth URL with params: {params}")
+        # Don't log sensitive parameters
+        current_app.logger.info("Generating Zoho auth URL")
         auth_url = f"{self.accounts_url}/oauth/v2/auth"
         query_string = urlencode(params)
         full_url = f"{auth_url}?{query_string}"
-        current_app.logger.info(f"Generated auth URL: {full_url}")
+        current_app.logger.info("Generated Zoho auth URL")
         return full_url
     
     def handle_callback(self, code: str) -> bool:
@@ -262,7 +266,7 @@ class ZohoService:
         try:
             # Exchange code for tokens
             token_url = f"{self.accounts_url}/oauth/v2/token"
-            current_app.logger.info(f"Requesting token from: {token_url}")
+            current_app.logger.info("Processing Zoho OAuth callback")
             
             data = {
                 'code': code,
@@ -273,23 +277,23 @@ class ZohoService:
                 'access_type': 'offline'
             }
             
-            current_app.logger.info(f"Token request data: {data}")
             response = requests.post(token_url, data=data)
             
             if response.status_code != 200:
-                current_app.logger.error(f"Failed to get token: {response.status_code} - {response.text}")
+                current_app.logger.error(f"Failed to get Zoho token: {response.status_code}")
                 return False
                 
             try:
                 token_data = response.json()
-                current_app.logger.info(f"Received token response: {token_data}")
+                # Don't log token data
+                current_app.logger.info("Successfully received Zoho token response")
             except json.JSONDecodeError as e:
-                current_app.logger.error(f"Failed to parse token response: {response.text}")
+                current_app.logger.error("Failed to parse Zoho token response")
                 return False
             
             # Check if we got all required tokens
             if 'access_token' not in token_data or 'refresh_token' not in token_data:
-                current_app.logger.error(f"Missing required tokens in response: {token_data}")
+                current_app.logger.error("Missing required tokens in Zoho response")
                 return False
                 
             # Store tokens in user's database record
@@ -299,7 +303,7 @@ class ZohoService:
             
             # Commit token changes first
             db.session.commit()
-            current_app.logger.info(f"Successfully stored tokens for user {self.user.id}")
+            current_app.logger.info(f"Successfully stored Zoho tokens for user {self.user.id}")
             
             # Try to get organization ID, but don't fail if we can't
             try:
@@ -314,23 +318,24 @@ class ZohoService:
                 if org_response.status_code == 200:
                     try:
                         org_data = org_response.json()
-                        current_app.logger.info(f"Organization response: {org_data}")
+                        # Don't log sensitive organization data
+                        current_app.logger.info(f"Successfully retrieved Zoho organization data for user {self.user.id}")
                         if org_data.get('organizations'):
                             self.user.zoho_organization_id = org_data['organizations'][0]['organization_id']
                             db.session.commit()
-                            current_app.logger.info(f"Successfully stored organization ID for user {self.user.id}")
+                            current_app.logger.info(f"Successfully stored Zoho organization ID for user {self.user.id}")
                     except json.JSONDecodeError as e:
-                        current_app.logger.error(f"Failed to parse organization response: {org_response.text}")
+                        current_app.logger.error("Failed to parse Zoho organization response")
                 else:
-                    current_app.logger.error(f"Failed to get organization ID: {org_response.status_code} - {org_response.text}")
+                    current_app.logger.error(f"Failed to get Zoho organization ID: {org_response.status_code}")
             except Exception as e:
-                current_app.logger.error(f"Error getting organization ID: {str(e)}")
+                current_app.logger.error(f"Error getting Zoho organization ID: {str(e)}")
                 # Don't fail the whole process if we can't get the organization ID
             
             return True
             
         except Exception as e:
-            current_app.logger.error(f"Error handling callback: {str(e)}")
+            current_app.logger.error(f"Error handling Zoho callback: {str(e)}")
             db.session.rollback()
             return False
 

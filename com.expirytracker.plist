@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.expirytracker</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/divyanshsingh/Desktop/project copy/venv/bin/gunicorn</string>
+        <string>--workers</string>
+        <string>1</string>
+        <string>--bind</string>
+        <string>0.0.0.0:5000</string>
+        <string>app:create_app()</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/divyanshsingh/Desktop/project copy</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/divyanshsingh/Desktop/project copy/venv/bin</string>
+        <key>FLASK_ENV</key>
+        <string>production</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/Users/divyanshsingh/Desktop/project copy/logs/error.log</string>
+    <key>StandardOutPath</key>
+    <string>/Users/divyanshsingh/Desktop/project copy/logs/output.log</string>
+</dict>
+</plist> 

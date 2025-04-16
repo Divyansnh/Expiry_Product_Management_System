@@ -12,12 +12,19 @@ def cleanup_expired_items():
     """Cleanup expired items and send notifications."""
     try:
         current_date = datetime.now().date()
+        tomorrow = current_date + timedelta(days=1)
         
         # First, update all item statuses to ensure consistency
         items = Item.query.all()
         for item in items:
             item.update_status(force_update=True)
         db.session.commit()
+        
+        # Find items expiring tomorrow
+        expiring_tomorrow = Item.query.filter(
+            Item.expiry_date == tomorrow,
+            func.lower(Item.status) != 'expired'
+        ).all()
         
         # Find all expired items (case-insensitive)
         expired_items = Item.query.filter(
@@ -27,6 +34,17 @@ def cleanup_expired_items():
         
         notification_service = NotificationService()
         
+        # Create notifications for items expiring tomorrow
+        for item in expiring_tomorrow:
+            notification_service.create_notification(
+                user_id=item.user_id,
+                item_id=item.id,
+                message=f"Item '{item.name}' (ID: {item.id}) will expire tomorrow and will be removed from the system.",
+                type='email',
+                priority='high',
+                status='pending'  # Set as pending to show in notifications page
+            )
+        
         for item in expired_items:
             # Create notification for the user
             notification_service.create_notification(
@@ -34,7 +52,8 @@ def cleanup_expired_items():
                 item_id=item.id,
                 message=f"Item '{item.name}' (ID: {item.id}) has expired and will be removed from the system.",
                 type='email',
-                priority='high'
+                priority='high',
+                status='pending'  # Set as pending to show in notifications page
             )
             
             # Mark item as inactive in Zoho if it has a Zoho ID
@@ -53,6 +72,7 @@ def cleanup_expired_items():
         
         db.session.commit()
         current_app.logger.info(f"Successfully cleaned up {len(expired_items)} expired items")
+        current_app.logger.info(f"Created notifications for {len(expiring_tomorrow)} items expiring tomorrow")
         
     except Exception as e:
         current_app.logger.error(f"Error cleaning up expired items: {str(e)}")

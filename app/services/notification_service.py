@@ -39,6 +39,8 @@ class NotificationService:
     def check_expiry_dates(self) -> None:
         """Check all items for expiry dates and send email notifications."""
         try:
+            current_app.logger.info("Starting expiry date check at %s", datetime.now())
+            
             # Get all items with expiry dates that are not already expired
             items = Item.query.filter(
                 and_(
@@ -46,6 +48,8 @@ class NotificationService:
                     cast(BinaryExpression, Item.status != STATUS_EXPIRED)
                 )
             ).all()
+            
+            current_app.logger.info("Found %d items to check for notifications", len(items))
             
             # Group items by user
             user_items: Dict[int, List[Dict[str, Any]]] = {}
@@ -55,33 +59,35 @@ class NotificationService:
                 if days_until_expiry is None:
                     continue
                     
-                # Only process items that are expiring soon or expired
-                # Match the inventory status logic: items with days_until_expiry = 0 are "expiring soon"
-                if days_until_expiry in [0, 1, 3, 7, 15, 30] or days_until_expiry < 0:
-                    if item.user_id not in user_items:
-                        user_items[item.user_id] = []
-                    
-                    # Set priority based on days until expiry
-                    if days_until_expiry <= 3:
-                        priority = 'high'
-                    elif days_until_expiry <= 7:
-                        priority = 'normal'
-                    else:
-                        priority = 'low'
-                    
-                    user_items[item.user_id].append({
-                        'id': item.id,
-                        'name': item.name,
-                        'days_until_expiry': days_until_expiry,
-                        'expiry_date': item.expiry_date,
-                        'priority': priority
-                    })
+                # Process all items for daily notification
+                if item.user_id not in user_items:
+                    user_items[item.user_id] = []
+                
+                # Set priority based on days until expiry
+                if days_until_expiry <= 3:
+                    priority = 'high'
+                elif days_until_expiry <= 7:
+                    priority = 'normal'
+                else:
+                    priority = 'low'
+                
+                user_items[item.user_id].append({
+                    'id': item.id,
+                    'name': item.name,
+                    'days_until_expiry': days_until_expiry,
+                    'expiry_date': item.expiry_date,
+                    'priority': priority
+                })
             
             # Send email notifications to each user
             for user_id, items in user_items.items():
                 user = User.query.get(user_id)
                 if user and user.email_notifications and user.email:
+                    current_app.logger.info("Sending notification to user %s (%s) for %d items", 
+                                          user.username, user.email, len(items))
                     self.send_daily_notification_email(user, items)
+            
+            current_app.logger.info("Completed expiry date check at %s", datetime.now())
             
         except Exception as e:
             current_app.logger.error(f"Error checking expiry dates: {str(e)}")
@@ -143,7 +149,8 @@ class NotificationService:
         item_id: int,
         message: str,
         type: NotificationType,
-        priority: NotificationPriority = 'normal'
+        priority: NotificationPriority = 'normal',
+        status: Literal['sent', 'pending'] = 'sent'
     ) -> Optional[Notification]:
         """Create a new notification record.
         
@@ -153,6 +160,7 @@ class NotificationService:
             message: The notification message
             type: Type of notification (email)
             priority: Priority level of the notification
+            status: Status of the notification (sent or pending)
             
         Returns:
             The created notification or None if creation failed
@@ -163,7 +171,7 @@ class NotificationService:
         notification.message = message
         notification.type = type
         notification.priority = priority
-        notification.status = 'sent'  # Mark as sent since we're creating after sending
+        notification.status = status
         
         try:
             db.session.add(notification)

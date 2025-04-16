@@ -5,19 +5,29 @@ from app.models.user import User
 import time
 
 def log_request(app):
-    """Log request details."""
-    start_time = time.time()
+    """Log all requests to the application."""
+    start_times = {}
+    
+    @app.before_request
+    def before_request():
+        start_times[request.environ['werkzeug.request']] = time.time()
     
     @app.after_request
     def after_request(response):
-        if not app.debug:
-            return response
-            
-        duration = time.time() - start_time
+        # Don't log sensitive information in URLs
+        path = request.path
+        if '/auth/zoho/callback' in path:
+            path = '/auth/zoho/callback'  # Hide the callback parameters
+        elif '/auth' in path:
+            path = '/auth/***'  # Hide auth-related paths
+        
+        duration = time.time() - start_times.get(request.environ['werkzeug.request'], time.time())
         app.logger.info(
-            f'Request: {request.method} {request.url} - '
-            f'Status: {response.status_code} - '
-            f'Duration: {duration:.2f}s'
+            'Request: %s %s - Status: %s - Duration: %.2fs',
+            request.method,
+            path,
+            response.status_code,
+            duration
         )
         return response
 
